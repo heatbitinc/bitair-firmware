@@ -1,0 +1,35 @@
+Bitair firmware
+Copyright (C) 2025-2026 Heatbit Inc.
+
+This program is a modified version of ESP-Miner
+(https://github.com/bitaxeorg/ESP-Miner), copyright the ESP-Miner contributors,
+licensed under the GNU General Public License version 3. This modified version is
+distributed under the same license; see LICENSE.
+
+It is based on ESP-Miner commit 4fd18cef ("Configurable self test warmup temp
+(#1764)"). Heatbit Inc. modified it from 2025 to 2026:
+
+- added Bitair support: board configuration, PWM power and fan input from the
+  display, indication LED, TPM-300A and AHT20 sensors (main/, components/bitair_hw);
+- added Wi-Fi station management and BLE Wi-Fi provisioning
+  (components/wifi_manager, components/ble_provisioning);
+- added the Heatbit cloud client: telemetry, remote control, pool settings,
+  OTA updates, device identity and client certificates (components/heatbit,
+  components/device_state, components/device_identity, components/backend_auth,
+  components/ota_update);
+- added a thermal governor and changed power management, fault handling and the
+  frequency ramp (main/tasks, main/thermal, components/asic);
+- removed the AxeOS web UI, HTTP API, display, BAP and statistics.
+
+The git history of this repository records every change after the base commit.
+
+This program is distributed WITHOUT ANY WARRANTY; without even the implied
+warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+General Public License for more details.
+
+The license does not grant any rights to the Heatbit trademarks: "Heatbit",
+"Bitair" and the Heatbit logo are trademarks of Heatbit Inc. Bitaxe is a
+trademark of bitaxeorg; this is not an official Bitaxe product.
+
+The Bitair main board design is published separately under CERN-OHL-S-2.0:
+https://github.com/heatbitinc/bitair-mainboard

@@ -1,9 +1,11 @@
-# Reporting Security Issues
+# Security policy
 
-We take security bugs in esp-miner seriously. We appreciate your efforts to responsibly disclose your findings, and will make every effort to acknowledge your contributions.
+Please report security issues in the Bitair firmware privately, through the "Report a vulnerability" button
+on the Security tab of this repository (GitHub private vulnerability reporting). Do not open a public issue.
 
-To report a security issue, please use the GitHub Security Advisory ["Report a Vulnerability"](https://github.com/bitaxeorg/ESP-Miner/security/advisories/new) tab.
+Include what you found, how to reproduce it and the firmware version. We acknowledge reports within a few working
+days and keep you informed until a fix is released.
 
-A esp-miner maintainer will send a response indicating the next steps in handling your report. After the initial reply to your report, the security team will keep you informed of the progress towards a fix and full announcement, and may ask for additional information or guidance.
-
-Report security bugs in third-party modules to the person or team maintaining the module.
+Issues in ESP-Miner itself that also affect upstream should be reported to the ESP-Miner project as well:
+<https://github.com/bitaxeorg/ESP-Miner/security/advisories/new>. Issues in third-party components (ESP-IDF,
+mbedTLS, libsecp256k1) belong to their maintainers.
