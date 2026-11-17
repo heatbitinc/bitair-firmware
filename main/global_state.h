@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "freertos/FreeRTOS.h"
+#include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/semphr.h"
 #include "freertos/portmacro.h"
 #include "power_management_task.h"
@@ -12,8 +12,6 @@
 #include "coinbase_decoder.h"
 #include "work_queue.h"
 #include "device_config.h"
-#include "display.h"
-#include "scoreboard.h"
 #include "esp_transport.h"
 
 typedef enum {
@@ -50,24 +48,22 @@ typedef struct
     float hashrate_1h;
     float error_percentage;
     int64_t start_time;
+    uint64_t shares_submitted;
     uint64_t shares_accepted;
     uint64_t shares_rejected;
+    int64_t last_share_submitted_at_us;
+    int64_t last_share_accepted_at_us;
     uint64_t work_received;
     RejectedReasonStat rejected_reason_stats[10];
     int rejected_reason_stats_count;
-    int screen_page;
     uint64_t best_nonce_diff;
     char best_diff_string[DIFF_STRING_SIZE];
     uint64_t best_session_nonce_diff;
     char best_session_diff_string[DIFF_STRING_SIZE];
     int block_found;
     bool show_new_block;
-    char * ssid;
-    char wifi_status[256];
     char ip_addr_str[16]; // IP4ADDR_STRLEN_MAX
     char ipv6_addr_str[64]; // IPv6 address string with zone identifier (INET6_ADDRSTRLEN=46 + % + interface=15)
-    char ap_ssid[12];
-    bool ap_enabled;
     bool is_connected;
     int identify_mode_time_ms;
     char * pool_url;
@@ -100,19 +96,21 @@ typedef struct
     char pool_connection_info[64];
     bool overheat_mode;
     bool mining_paused;
+    int64_t mining_started_at_us;
     bool pools_unavailable;
+    bool stratum_connected;
     uint16_t power_fault;
     uint32_t lastClockSync;
-    bool is_screen_active;
     bool is_firmware_update;
     char firmware_update_filename[20];
     char firmware_update_status[20];
     bool hardware_fault;
+    // A temperature sensor stopped answering while the ASIC was powered; mining
+    // is held stopped until the sensors read again (power management task).
+    bool temp_sensor_fault;
     char hardware_fault_msg[64];
     const char * asic_status;
     char * version;
-    char * axeOSVersion;
-    Scoreboard scoreboard;
 } SystemModule;
 
 typedef struct
@@ -153,7 +151,6 @@ typedef struct
 
     SystemModule SYSTEM_MODULE;
     DeviceConfig DEVICE_CONFIG;
-    DisplayConfig DISPLAY_CONFIG;
     AsicTaskModule ASIC_TASK_MODULE;
     PowerManagementModule POWER_MANAGEMENT_MODULE;
     SelfTestModule SELF_TEST_MODULE;
@@ -183,7 +180,6 @@ typedef struct
 
     bool ASIC_initalized;
     bool psram_is_available;
-    bool filesystem_is_available;
 
     int block_height;
     char scriptsig[128];

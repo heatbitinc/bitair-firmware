@@ -1,5 +1,5 @@
 # Stage 1: Base image with ESP-IDF and common dependencies
-FROM espressif/idf:v5.5.2 AS base
+FROM espressif/idf:v5.5.4 AS base
 
 ARG DEBIAN_FRONTEND=nointeractive
 
@@ -13,10 +13,6 @@ RUN apt-get update \
   libnuma1 \
   libpixman-1-dev \
   && rm -rf /var/lib/apt/lists/*
-
-# Node.js and npm (v20 is required)
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-  && apt-get install -y nodejs
 
 # Common environment setup
 ENV LC_ALL=C.UTF-8

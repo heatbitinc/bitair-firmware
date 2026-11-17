@@ -1,6 +1,9 @@
 # Configuration files
 sdkconfig
 sdkconfig.old
+# Local configuration overlays (backend endpoints, log level)
+sdkconfig.defaults.heatbit
+sdkconfig.defaults.logs
 dependencies.lock
 
 # Visual Studio Code
@@ -12,8 +15,16 @@ dependencies.lock
 .history/*
 
 # Production folder
+.ccls-cache/
+compile_commands.json
+.envrc/
 build/
+build-*/
+build-make/
+dkbuild/
+.worktrees/
 **/build/
+**/build-make/
 !build/config
 build/config/*
 !build/config/kconfig_menus.json
@@ -29,6 +40,7 @@ components/components/*
 config.bin
 config.cvs
 managed_components/*
+test-ci/managed_components/
 
 # System files
 .DS_Store
@@ -37,5 +49,7 @@ debug.log
 .vscode
 .cache
 
-# Device list file for tools/upload2device.py
-devices.txt
+
+version.txt
+# Device certificates and keys (never commit)
+certs/

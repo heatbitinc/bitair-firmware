@@ -1,4 +1,4 @@
-menu "Bitaxe Configuration"
+menu "Bitair Configuration"
 
     menu "GPIO Pin Configuration"
 
@@ -37,46 +37,163 @@ menu "Bitaxe Configuration"
             default 48
             help
                 GPIO pin for I2C clock line (SCL).
-        config GPIO_BAP_RX
-            int "I2C BAP Pin"
-            default 40
+
+    endmenu
+
+    config BITAIR_VF_CALIBRATION
+        bool "Run voltage/frequency calibration after mining starts (development)"
+        default n
             help
-                GPIO pin for BAP receiving line.
-        config GPIO_BAP_TX
-            int "I2C BAP Pin"
-            default 39
+            Steps through frequencies and core voltages, logging hashrate,
+            ASIC errors, current and temperatures as VFCAL lines. Drives the
+            chip outside its normal settings: development only, never in
+            release builds. Disable the thermal governor while calibrating.
+
+    menu "Thermal governor"
+
+        config THERMAL_GOVERNOR_ENABLED
+            bool "Lower the ASIC frequency while hot, without stopping mining"
+            default y
             help
-                GPIO pin for BAP transmitting line.
+                While the chip or the core regulator runs hot, the frequency is
+                lowered in steps by a partial ramp, and raised again once both
+                have cooled down. The emergency overheat stop (chip above 75 C,
+                regulator above 105 C) still cuts power.
+
+        config THERMAL_GOVERNOR_CHIP_THROTTLE_C
+            int "Chip temperature to start slowing down (C)"
+            default 70
+
+        config THERMAL_GOVERNOR_CHIP_RECOVER_C
+            int "Chip temperature to allow speeding up (C)"
+            default 65
+
+        config THERMAL_GOVERNOR_VR_THROTTLE_C
+            int "Regulator temperature to start slowing down (C)"
+            default 95
+
+        config THERMAL_GOVERNOR_VR_RECOVER_C
+            int "Regulator temperature to allow speeding up (C)"
+            default 85
+
+        config THERMAL_GOVERNOR_STEP_MHZ
+            int "Frequency step per adjustment (MHz)"
+            range 5 200
+            default 25
+
+        config THERMAL_GOVERNOR_DOWN_INTERVAL_MS
+            int "Minimum time between slow-downs (ms)"
+            default 5000
+
+        config THERMAL_GOVERNOR_UP_INTERVAL_MS
+            int "Minimum time before speeding up again (ms)"
+            default 30000
+
+        config THERMAL_GOVERNOR_MIN_FREQUENCY_MHZ
+            int "Lowest frequency the governor may set (MHz)"
+            default 300
+
+        config THERMAL_GOVERNOR_UV_PER_MHZ
+            int "Core voltage reduction per MHz of throttle (uV/MHz)"
+            range 0 5000
+            default 0
+            help
+                0 keeps the core voltage unchanged while throttled. A positive
+                value lowers it with the frequency, e.g. 500 uV/MHz gives
+                -100 mV at -200 MHz. Calibrate against the chip's stable
+                voltage/frequency curve before enabling.
+
+        config THERMAL_GOVERNOR_MIN_VOLTAGE_MV
+            int "Lowest core voltage the governor may set (mV)"
+            default 1000
             
     endmenu
     
     config ASIC_VOLTAGE
         int "ASIC Core Voltage (mV)"
         range 1000 1800
-        default 1400
+        default 1250
         help
-            The core voltage to set the ASIC to. 1200 for BM1366 or 1400 for BM1397 is typical.
+            The core voltage to set the ASIC to.
 
     config ASIC_FREQUENCY
         int "ASIC Hash Frequency (MHz)"
         range 50 800
-        default 250
+        default 600
         help
-            The BM1397 hash frequency
+            The BM1370 hash frequency
+
+    config FORCE_MINING_DISABLED
+        bool "Force mining disabled"
+        default n
+        help
+            If enabled, mining stays disabled regardless of runtime requests
+            from PWM/state services.
+
+    config MONITOR_LOGGING_ENABLED
+        bool "Enable runtime monitor logging"
+        default n
+        help
+            Enable or disable runtime ESP logging output in monitor.
+            When disabled, app_main sets global log level to NONE for all tags.
+
+    config ENABLE_AHT20_SENSOR
+        bool "Enable AHT20 temperature/humidity sensor"
+        default y
+        help
+            Enable the AHT20 temperature/humidity sensor on the shared I2C bus
+            (address 0x38). Without the sensor the service disables itself at
+            startup, so this can stay on for all Bitair variants.
+
+    config OTA_CHECK_INTERVAL_S
+        int "OTA check interval (seconds)"
+        range 60 86400
+        default 600
+        help
+            Period between OTA update checks in seconds.
+            Default is 600 seconds (10 minutes).
+
+
+    choice FAN_PWM_FREQUENCY_PRESET_VALUE
+        prompt "Fan PWM frequency preset"
+        default FAN_PWM_FREQ_1400
+        help
+            Predefined fan PWM frequencies. The driver maps these to the
+            nearest supported hardware register value.
+
+        config FAN_PWM_FREQ_22500
+            bool "22500 Hz"
+
+        config FAN_PWM_FREQ_11250
+            bool "11250 Hz"
+
+        config FAN_PWM_FREQ_5600
+            bool "5600 Hz"
+
+        config FAN_PWM_FREQ_1400
+            bool "1400 Hz"
+    endchoice
+
+    config FAN_PWM_FREQUENCY_HZ_EFFECTIVE
+        int
+        default 22500 if FAN_PWM_FREQ_22500
+        default 11250 if FAN_PWM_FREQ_11250
+        default 5600 if FAN_PWM_FREQ_5600
+        default 1400 if FAN_PWM_FREQ_1400
 endmenu
 
 menu "Stratum Configuration"
 
     config STRATUM_URL
         string "Stratum Address"
-        default "public-pool.io"
+        default "solo.pool.heatbit.com"
         help
             The example will connect to this Stratum pool address.
 
     config STRATUM_PORT
         int "Stratum Port"
         range 0 65535
-        default 21496
+        default 13333
         help
             The stratum server port to connect to.
     
@@ -116,14 +233,14 @@ menu "Stratum Configuration"
 
     config FALLBACK_STRATUM_URL
         string "Fallback Stratum Address"
-        default "solo.ckpool.org"
+        default "solo.pool.heatbit.com"
         help
             The example will connect to this Stratum pool address if the primary fails.
 
     config FALLBACK_STRATUM_PORT
         int "Fallback Stratum Port"
         range 0 65535
-        default 3333
+        default 13333
         help
             The stratum server port to connect to if the primary fails.
     
@@ -163,7 +280,7 @@ menu "Stratum Configuration"
 
     config STRATUM_USER
         string "Stratum username"
-        default "replace-this-with-your-btc-address.bitaxe"
+        default "replace-this-with-your-btc-address.bitair"
         help
             Stratum user to use with pool
 
@@ -175,7 +292,7 @@ menu "Stratum Configuration"
 
     config FALLBACK_STRATUM_USER
         string "Fallback Stratum username"
-        default "replace-this-with-your-btc-address.bitaxe"
+        default "replace-this-with-your-btc-address.bitair"
         help
             Fallback Stratum user to use with pool
 

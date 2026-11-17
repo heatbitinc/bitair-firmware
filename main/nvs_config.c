@@ -12,9 +12,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
-#include "display.h"
-#include "theme_api.h"
-#include "scoreboard.h"
+
 
 #define NVS_CONFIG_NAMESPACE "main"
 #define NVS_STR_LIMIT (4000 - 1) // See nvs_set_str
@@ -32,7 +30,6 @@
 #endif
 
 #define FALLBACK_KEY_ASICFREQUENCY "asicfrequency" // Since v2.10.0 (https://github.com/bitaxeorg/ESP-Miner/pull/1051)
-#define FALLBACK_KEY_FANSPEED "fanspeed"           // Since v2.11.0 (https://github.com/bitaxeorg/ESP-Miner/pull/1331)
 
 typedef struct {
     NvsConfigKey key;
@@ -48,60 +45,42 @@ static nvs_handle_t handle;
 static SemaphoreHandle_t nvs_cache_mutex = NULL;
 
 static Settings settings[NVS_CONFIG_COUNT] = {
-    [NVS_CONFIG_WIFI_SSID]                             = {.nvs_key_name = "wifissid",        .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_ESP_WIFI_SSID},                .rest_name = "ssid",                               .min = 1,  .max = 32},
-    [NVS_CONFIG_WIFI_PASS]                             = {.nvs_key_name = "wifipass",        .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_ESP_WIFI_PASSWORD},            .rest_name = "wifiPass",                           .min = 0,  .max = 63},
-    [NVS_CONFIG_HOSTNAME]                              = {.nvs_key_name = "hostname",        .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_LWIP_LOCAL_HOSTNAME},          .rest_name = "hostname",                           .min = 1,  .max = 32},
 
-    [NVS_CONFIG_STRATUM_PROTOCOL]                      = {.nvs_key_name = "stratumprot",     .type = TYPE_STR,   .default_value = {.str = STRATUM_V1},                                  .rest_name = "stratumProtocol",                    .min = 3,  .max = 3},
-    [NVS_CONFIG_STRATUM_URL]                           = {.nvs_key_name = "stratumurl",      .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_STRATUM_URL},                  .rest_name = "stratumURL",                         .min = 0,  .max = NVS_STR_LIMIT},
-    [NVS_CONFIG_STRATUM_PORT]                          = {.nvs_key_name = "stratumport",     .type = TYPE_U16,   .default_value = {.u16 = CONFIG_STRATUM_PORT},                         .rest_name = "stratumPort",                        .min = 0,  .max = UINT16_MAX},
-    [NVS_CONFIG_STRATUM_USER]                          = {.nvs_key_name = "stratumuser",     .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_STRATUM_USER},                 .rest_name = "stratumUser",                        .min = 0,  .max = NVS_STR_LIMIT},
-    [NVS_CONFIG_STRATUM_PASS]                          = {.nvs_key_name = "stratumpass",     .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_STRATUM_PW},                   .rest_name = "stratumPassword",                    .min = 0,  .max = NVS_STR_LIMIT},
-    [NVS_CONFIG_STRATUM_DIFFICULTY]                    = {.nvs_key_name = "stratumdiff",     .type = TYPE_U16,   .default_value = {.u16 = CONFIG_STRATUM_DIFFICULTY},                   .rest_name = "stratumSuggestedDifficulty",         .min = 0,  .max = UINT16_MAX},
-    [NVS_CONFIG_STRATUM_EXTRANONCE_SUBSCRIBE]          = {.nvs_key_name = "stratumxnsub",    .type = TYPE_BOOL,  .default_value = {.b   = (bool)STRATUM_EXTRANONCE_SUBSCRIBE},          .rest_name = "stratumExtranonceSubscribe",         .min = 0,  .max = 1},
-    [NVS_CONFIG_STRATUM_TLS]                           = {.nvs_key_name = "stratumtls",      .type = TYPE_U16,   .default_value = {.u16 = (uint16_t)CONFIG_STRATUM_TLS},                .rest_name = "stratumTLS",                         .min = 0,  .max = 3},
-    [NVS_CONFIG_STRATUM_CERT]                          = {.nvs_key_name = "stratumcert",     .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_STRATUM_CERT},                 .rest_name = "stratumCert",                        .min = 0,  .max = NVS_STR_LIMIT},
-    [NVS_CONFIG_SV2_CHANNEL_TYPE]                      = {.nvs_key_name = "sv2chantype",     .type = TYPE_STR,   .default_value = {.str = SV2_CHANNEL_TYPE_EXTENDED},                   .rest_name = "stratumV2ChannelType",               .min = 8,  .max = 8},
-    [NVS_CONFIG_SV2_AUTHORITY_PUBKEY]                  = {.nvs_key_name = "sv2authpubkey",   .type = TYPE_STR,   .default_value = {.str = ""},                                          .rest_name = "stratumV2AuthorityPubkey",           .min = 0,  .max = 52},   
-    [NVS_CONFIG_STRATUM_DECODE_COINBASE_TX]            = {.nvs_key_name = "stratumdecode",   .type = TYPE_BOOL,  .default_value = {.b   = true},                                        .rest_name = "stratumDecodeCoinbase",              .min = 0,  .max = 1},
-    [NVS_CONFIG_FALLBACK_STRATUM_PROTOCOL]             = {.nvs_key_name = "fbstratumprot",   .type = TYPE_STR,   .default_value = {.str = STRATUM_V1},                                  .rest_name = "fallbackStratumProtocol",            .min = 3,  .max = 3},
-    [NVS_CONFIG_FALLBACK_STRATUM_URL]                  = {.nvs_key_name = "fbstratumurl",    .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_FALLBACK_STRATUM_URL},         .rest_name = "fallbackStratumURL",                 .min = 0,  .max = NVS_STR_LIMIT},
-    [NVS_CONFIG_FALLBACK_STRATUM_PORT]                 = {.nvs_key_name = "fbstratumport",   .type = TYPE_U16,   .default_value = {.u16 = CONFIG_FALLBACK_STRATUM_PORT},                .rest_name = "fallbackStratumPort",                .min = 0,  .max = UINT16_MAX},
-    [NVS_CONFIG_FALLBACK_STRATUM_USER]                 = {.nvs_key_name = "fbstratumuser",   .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_FALLBACK_STRATUM_USER},        .rest_name = "fallbackStratumUser",                .min = 0,  .max = NVS_STR_LIMIT},
-    [NVS_CONFIG_FALLBACK_STRATUM_PASS]                 = {.nvs_key_name = "fbstratumpass",   .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_FALLBACK_STRATUM_PW},          .rest_name = "fallbackStratumPassword",            .min = 0,  .max = NVS_STR_LIMIT},
-    [NVS_CONFIG_FALLBACK_STRATUM_DIFFICULTY]           = {.nvs_key_name = "fbstratumdiff",   .type = TYPE_U16,   .default_value = {.u16 = CONFIG_FALLBACK_STRATUM_DIFFICULTY},          .rest_name = "fallbackStratumSuggestedDifficulty", .min = 0,  .max = UINT16_MAX},
-    [NVS_CONFIG_FALLBACK_STRATUM_EXTRANONCE_SUBSCRIBE] = {.nvs_key_name = "stratumfbxnsub",  .type = TYPE_BOOL,  .default_value = {.b   = (bool)FALLBACK_STRATUM_EXTRANONCE_SUBSCRIBE}, .rest_name = "fallbackStratumExtranonceSubscribe", .min = 0,  .max = 1},
-    [NVS_CONFIG_FALLBACK_STRATUM_TLS]                  = {.nvs_key_name = "fbstratumtls",    .type = TYPE_U16,   .default_value = {.u16 = (uint16_t)CONFIG_FALLBACK_STRATUM_TLS},       .rest_name = "fallbackStratumTLS",                 .min = 0,  .max = 3},
-    [NVS_CONFIG_FALLBACK_STRATUM_CERT]                 = {.nvs_key_name = "fbstratumcert",   .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_FALLBACK_STRATUM_CERT},        .rest_name = "fallbackStratumCert",                .min = 0,  .max = NVS_STR_LIMIT},
-    [NVS_CONFIG_FALLBACK_SV2_CHANNEL_TYPE]             = {.nvs_key_name = "fbsv2chantype",   .type = TYPE_STR,   .default_value = {.str = SV2_CHANNEL_TYPE_EXTENDED},                   .rest_name = "fallbackStratumV2ChannelType",       .min = 8,  .max = 8},
-    [NVS_CONFIG_FALLBACK_SV2_AUTHORITY_PUBKEY]         = {.nvs_key_name = "fbsv2authpubk",   .type = TYPE_STR,   .default_value = {.str = ""},                                          .rest_name = "fallbackStratumV2AuthorityPubkey",   .min = 0,  .max = 52},
-    [NVS_CONFIG_FALLBACK_STRATUM_DECODE_COINBASE_TX]   = {.nvs_key_name = "fbstratumdecode", .type = TYPE_BOOL,  .default_value = {.b   = true},                                        .rest_name = "fallbackStratumDecodeCoinbase",      .min = 0,  .max = 1},
-    [NVS_CONFIG_USE_FALLBACK_STRATUM]                  = {.nvs_key_name = "usefbstartum",    .type = TYPE_BOOL,                                                                         .rest_name = "useFallbackStratum",                 .min = 0,  .max = 1},
+    [NVS_CONFIG_STRATUM_PROTOCOL]                      = {.nvs_key_name = "stratumprot",     .type = TYPE_STR,   .default_value = {.str = STRATUM_V1}},
+    [NVS_CONFIG_STRATUM_URL]                           = {.nvs_key_name = "stratumurl",      .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_STRATUM_URL}},
+    [NVS_CONFIG_STRATUM_PORT]                          = {.nvs_key_name = "stratumport",     .type = TYPE_U16,   .default_value = {.u16 = CONFIG_STRATUM_PORT}},
+    [NVS_CONFIG_STRATUM_USER]                          = {.nvs_key_name = "stratumuser",     .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_STRATUM_USER}},
+    [NVS_CONFIG_STRATUM_PASS]                          = {.nvs_key_name = "stratumpass",     .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_STRATUM_PW}},
+    [NVS_CONFIG_STRATUM_DIFFICULTY]                    = {.nvs_key_name = "stratumdiff",     .type = TYPE_U16,   .default_value = {.u16 = CONFIG_STRATUM_DIFFICULTY}},
+    [NVS_CONFIG_STRATUM_EXTRANONCE_SUBSCRIBE]          = {.nvs_key_name = "stratumxnsub",    .type = TYPE_BOOL,  .default_value = {.b   = (bool)STRATUM_EXTRANONCE_SUBSCRIBE}},
+    [NVS_CONFIG_STRATUM_TLS]                           = {.nvs_key_name = "stratumtls",      .type = TYPE_U16,   .default_value = {.u16 = (uint16_t)CONFIG_STRATUM_TLS}},
+    [NVS_CONFIG_STRATUM_CERT]                          = {.nvs_key_name = "stratumcert",     .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_STRATUM_CERT}},
+    [NVS_CONFIG_SV2_CHANNEL_TYPE]                      = {.nvs_key_name = "sv2chantype",     .type = TYPE_STR,   .default_value = {.str = SV2_CHANNEL_TYPE_EXTENDED}},
+    [NVS_CONFIG_SV2_AUTHORITY_PUBKEY]                  = {.nvs_key_name = "sv2authpubkey",   .type = TYPE_STR,   .default_value = {.str = ""}},
+    [NVS_CONFIG_STRATUM_DECODE_COINBASE_TX]            = {.nvs_key_name = "stratumdecode",   .type = TYPE_BOOL,  .default_value = {.b   = true}},
+    [NVS_CONFIG_FALLBACK_STRATUM_PROTOCOL]             = {.nvs_key_name = "fbstratumprot",   .type = TYPE_STR,   .default_value = {.str = STRATUM_V1}},
+    [NVS_CONFIG_FALLBACK_STRATUM_URL]                  = {.nvs_key_name = "fbstratumurl",    .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_FALLBACK_STRATUM_URL}},
+    [NVS_CONFIG_FALLBACK_STRATUM_PORT]                 = {.nvs_key_name = "fbstratumport",   .type = TYPE_U16,   .default_value = {.u16 = CONFIG_FALLBACK_STRATUM_PORT}},
+    [NVS_CONFIG_FALLBACK_STRATUM_USER]                 = {.nvs_key_name = "fbstratumuser",   .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_FALLBACK_STRATUM_USER}},
+    [NVS_CONFIG_FALLBACK_STRATUM_PASS]                 = {.nvs_key_name = "fbstratumpass",   .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_FALLBACK_STRATUM_PW}},
+    [NVS_CONFIG_FALLBACK_STRATUM_DIFFICULTY]           = {.nvs_key_name = "fbstratumdiff",   .type = TYPE_U16,   .default_value = {.u16 = CONFIG_FALLBACK_STRATUM_DIFFICULTY}},
+    [NVS_CONFIG_FALLBACK_STRATUM_EXTRANONCE_SUBSCRIBE] = {.nvs_key_name = "stratumfbxnsub",  .type = TYPE_BOOL,  .default_value = {.b   = (bool)FALLBACK_STRATUM_EXTRANONCE_SUBSCRIBE}},
+    [NVS_CONFIG_FALLBACK_STRATUM_TLS]                  = {.nvs_key_name = "fbstratumtls",    .type = TYPE_U16,   .default_value = {.u16 = (uint16_t)CONFIG_FALLBACK_STRATUM_TLS}},
+    [NVS_CONFIG_FALLBACK_STRATUM_CERT]                 = {.nvs_key_name = "fbstratumcert",   .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_FALLBACK_STRATUM_CERT}},
+    [NVS_CONFIG_FALLBACK_SV2_CHANNEL_TYPE]             = {.nvs_key_name = "fbsv2chantype",   .type = TYPE_STR,   .default_value = {.str = SV2_CHANNEL_TYPE_EXTENDED}},
+    [NVS_CONFIG_FALLBACK_SV2_AUTHORITY_PUBKEY]         = {.nvs_key_name = "fbsv2authpubk",   .type = TYPE_STR,   .default_value = {.str = ""}},
+    [NVS_CONFIG_FALLBACK_STRATUM_DECODE_COINBASE_TX]   = {.nvs_key_name = "fbstratumdecode", .type = TYPE_BOOL,  .default_value = {.b   = true}},
+    [NVS_CONFIG_USE_FALLBACK_STRATUM]                  = {.nvs_key_name = "usefbstartum",    .type = TYPE_BOOL},
 
-    [NVS_CONFIG_ASIC_FREQUENCY]                        = {.nvs_key_name = "asicfrequency_f", .type = TYPE_FLOAT, .default_value = {.f   = CONFIG_ASIC_FREQUENCY},                       .rest_name = "frequency",                          .min = 1,  .max = UINT16_MAX},
-    [NVS_CONFIG_ASIC_VOLTAGE]                          = {.nvs_key_name = "asicvoltage",     .type = TYPE_U16,   .default_value = {.u16 = CONFIG_ASIC_VOLTAGE},                         .rest_name = "coreVoltage",                        .min = 1,  .max = UINT16_MAX},
-    [NVS_CONFIG_OVERCLOCK_ENABLED]                     = {.nvs_key_name = "oc_enabled",      .type = TYPE_BOOL,                                                                         .rest_name = "overclockEnabled",                   .min = 0,  .max = 1},
+    [NVS_CONFIG_ASIC_FREQUENCY]                        = {.nvs_key_name = "asicfrequency_f", .type = TYPE_FLOAT, .default_value = {.f   = CONFIG_ASIC_FREQUENCY}},
+    [NVS_CONFIG_ASIC_VOLTAGE]                          = {.nvs_key_name = "asicvoltage",     .type = TYPE_U16,   .default_value = {.u16 = CONFIG_ASIC_VOLTAGE}},
     
-    [NVS_CONFIG_DISPLAY]                               = {.nvs_key_name = "display",         .type = TYPE_STR,   .default_value = {.str = DEFAULT_DISPLAY},                             .rest_name = "display",                            .min = 0,  .max = NVS_STR_LIMIT},
-    [NVS_CONFIG_ROTATION]                              = {.nvs_key_name = "rotation",        .type = TYPE_U16,                                                                          .rest_name = "rotation",                           .min = 0,  .max = 270},
-    [NVS_CONFIG_INVERT_SCREEN]                         = {.nvs_key_name = "invertscreen",    .type = TYPE_BOOL,                                                                         .rest_name = "invertscreen",                       .min = 0,  .max = 1},
-    [NVS_CONFIG_DISPLAY_OFFSET]                        = {.nvs_key_name = "displayOffset",   .type = TYPE_U16,   .default_value = {.u16 = LCD_SH1107_PARAM_DEFAULT_DISP_OFFSET },       .rest_name = "displayOffset",                      .min = 0,  .max = UINT8_MAX},
-    [NVS_CONFIG_DISPLAY_TIMEOUT]                       = {.nvs_key_name = "displayTimeout",  .type = TYPE_I32,   .default_value = {.i32 = -1},                                          .rest_name = "displayTimeout",                     .min = -1, .max = UINT16_MAX},
 
-    [NVS_CONFIG_AUTO_FAN_SPEED]                        = {.nvs_key_name = "autofanspeed",    .type = TYPE_BOOL,  .default_value = {.b   = true},                                        .rest_name = "autofanspeed",                       .min = 0,  .max = 1},
-    [NVS_CONFIG_MANUAL_FAN_SPEED]                      = {.nvs_key_name = "manualfanspeed",  .type = TYPE_U16,   .default_value = {.u16 = 100},                                         .rest_name = "manualFanSpeed",                     .min = 0,  .max = 100},
-    [NVS_CONFIG_MIN_FAN_SPEED]                         = {.nvs_key_name = "minfanspeed",     .type = TYPE_U16,   .default_value = {.u16 = 25},                                          .rest_name = "minFanSpeed",                        .min = 0,  .max = 99},
-    [NVS_CONFIG_TEMP_TARGET]                           = {.nvs_key_name = "temptarget",      .type = TYPE_U16,   .default_value = {.u16 = 60},                                          .rest_name = "temptarget",                         .min = 35, .max = 66},
-    [NVS_CONFIG_OVERHEAT_MODE]                         = {.nvs_key_name = "overheat_mode",   .type = TYPE_BOOL,                                                                         .rest_name = "overheat_mode",                      .min = 0,  .max = 0},
+    [NVS_CONFIG_OVERHEAT_MODE]                         = {.nvs_key_name = "overheat_mode",   .type = TYPE_BOOL},
 
-    [NVS_CONFIG_STATISTICS_FREQUENCY]                  = {.nvs_key_name = "statsFrequency",  .type = TYPE_U16,                                                                          .rest_name = "statsFrequency",                     .min = 0,  .max = UINT16_MAX},
 
     [NVS_CONFIG_BEST_DIFF]                             = {.nvs_key_name = "bestdiff",        .type = TYPE_U64},
     [NVS_CONFIG_SELF_TEST]                             = {.nvs_key_name = "selftest",        .type = TYPE_BOOL},
-    [NVS_CONFIG_SWARM]                                 = {.nvs_key_name = "swarmconfig",     .type = TYPE_STR},
-    [NVS_CONFIG_THEME_SCHEME]                          = {.nvs_key_name = "themescheme",     .type = TYPE_STR,   .default_value = {.str = DEFAULT_THEME}},
-    [NVS_CONFIG_THEME_COLORS]                          = {.nvs_key_name = "themecolors",     .type = TYPE_STR,   .default_value = {.str = DEFAULT_COLORS}},
-    [NVS_CONFIG_SCOREBOARD]                            = {.nvs_key_name = "scoreboard",      .type = TYPE_STR,   .array_size = MAX_SCOREBOARD},
     
     [NVS_CONFIG_BOARD_VERSION]                         = {.nvs_key_name = "boardversion",    .type = TYPE_STR,   .default_value = {.str = "000"}},
     [NVS_CONFIG_DEVICE_MODEL]                          = {.nvs_key_name = "devicemodel",     .type = TYPE_STR,   .default_value = {.str = "unknown"}},
@@ -121,8 +100,9 @@ static Settings settings[NVS_CONFIG_COUNT] = {
     [NVS_CONFIG_TMP1075]                               = {.nvs_key_name = "TMP1075",         .type = TYPE_BOOL},
     [NVS_CONFIG_POWER_CONSUMPTION_TARGET]              = {.nvs_key_name = "power_cons_tgt",  .type = TYPE_U16},
     [NVS_CONFIG_SELF_TEST_TEMP_TARGET]                 = {.nvs_key_name = "selftest_temp",   .type = TYPE_U16,   .default_value = {.u16 = 65}},
-    [NVS_CONFIG_SELF_TEST_TEMP_WARMUP]                 = {.nvs_key_name = "selftest_warm",   .type = TYPE_U16,   .default_value = {.u16 = 55}},
-    [NVS_CONFIG_SELF_TEST_TEMP_MAX]                    = {.nvs_key_name = "selftest_max",    .type = TYPE_U16,   .default_value = {.u16 = 70}},
+    [NVS_CONFIG_SELF_TEST_TEMP_WARMUP]                 = {.nvs_key_name = "selftest_warm",   .type = TYPE_U16,   .default_value = {.u16 = 43}},
+    [NVS_CONFIG_SELF_TEST_TEMP_MAX]                    = {.nvs_key_name = "selftest_max",    .type = TYPE_U16,   .default_value = {.u16 = 75}},
+    [NVS_HB_DEVICE_MODEL]                              = {.nvs_key_name = "hb_model",        .type = TYPE_STR,   .default_value = {.str = "bitair"}},
 };
 
 Settings *nvs_config_get_settings(NvsConfigKey key)
@@ -165,16 +145,6 @@ static void nvs_config_init_fallback(NvsConfigKey key, Settings * setting)
             }
         }
     }
-    if (key == NVS_CONFIG_MANUAL_FAN_SPEED) {
-        if (nvs_find_key(handle, setting->nvs_key_name, NULL) == ESP_ERR_NVS_NOT_FOUND) {
-            uint16_t val;
-            ret = nvs_get_u16(handle, FALLBACK_KEY_FANSPEED, &val);
-            if (ret == ESP_OK) {
-                ESP_LOGI(TAG, "Migrating NVS config %s to %s (%d)", FALLBACK_KEY_FANSPEED, setting->nvs_key_name, val);
-                nvs_set_u16(handle, setting->nvs_key_name, val);
-            }
-        }
-    }
     if (key == NVS_CONFIG_STRATUM_PROTOCOL || key == NVS_CONFIG_FALLBACK_STRATUM_PROTOCOL) {
         uint16_t val;
         if (nvs_get_u16(handle, setting->nvs_key_name, &val) == ESP_OK) {
@@ -209,9 +179,6 @@ static void nvs_config_apply_fallback(NvsConfigKey key, Settings * setting)
 {
     if (key == NVS_CONFIG_ASIC_FREQUENCY) {
         nvs_set_u16(handle, FALLBACK_KEY_ASICFREQUENCY, (uint16_t) setting->value[0].f);
-    }
-    if (key == NVS_CONFIG_MANUAL_FAN_SPEED) {
-        nvs_set_u16(handle, FALLBACK_KEY_FANSPEED, setting->value[0].u16);
     }
 }
 

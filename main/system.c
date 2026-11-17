@@ -1,52 +1,86 @@
-#include <inttypes.h>
-#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
 
-#include "freertos/FreeRTOS.h"
+#include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
-#include "esp_check.h"
 
 #include "driver/gpio.h"
 #include "esp_app_desc.h"
 #include "esp_timer.h"
-#include "esp_wifi.h"
-#include "lwip/inet.h"
 
 #include "system.h"
-#include "i2c_bitaxe.h"
-#include "INA260.h"
-#include "adc.h"
-#include "connect.h"
+#include "mqtt_service.h"
 #include "nvs_config.h"
-#include "display.h"
-#include "input.h"
-#include "screen.h"
 #include "vcore.h"
 #include "thermal.h"
 #include "utils.h"
 #include "self_test.h"
-#include "filesystem.h"
 #include "work_queue.h"
 #include "hashrate_monitor_task.h"
+#include "tasks/fan_controller_task.h"
 
 static const char * TAG = "system";
 
 //local function prototypes
 static esp_err_t ensure_overheat_mode_config();
 
+/*
+ * Pool strings in SYSTEM_MODULE are read without a lock by tasks that keep
+ * running across a stratum reload (ASIC result submission, MQTT status). A
+ * replaced string is therefore not freed at once but retired and freed on the
+ * next reload, long after any reader has finished with it.
+ */
+#define RETIRED_RUNTIME_STRINGS_MAX 8
+static char *s_retired_runtime_strings[RETIRED_RUNTIME_STRINGS_MAX];
+static size_t s_retired_runtime_string_count;
+
+static void free_retired_runtime_strings(void)
+{
+    for (size_t i = 0; i < s_retired_runtime_string_count; i++) {
+        free(s_retired_runtime_strings[i]);
+        s_retired_runtime_strings[i] = NULL;
+    }
+    s_retired_runtime_string_count = 0;
+}
+
+static void replace_runtime_string(char **target, char *replacement)
+{
+    if (replacement == NULL) {
+        return;
+    }
+
+    char *old = *target;
+    *target = replacement;
+    if (old != NULL) {
+        if (s_retired_runtime_string_count < RETIRED_RUNTIME_STRINGS_MAX) {
+            s_retired_runtime_strings[s_retired_runtime_string_count++] = old;
+        } else {
+            ESP_LOGW(TAG, "Retired runtime string list full; leaking old value");
+        }
+    }
+}
+
 void SYSTEM_init_system(GlobalState * GLOBAL_STATE)
 {
     SystemModule * module = &GLOBAL_STATE->SYSTEM_MODULE;
 
-    module->screen_page = 0;
+    if (GLOBAL_STATE->valid_jobs == NULL) {
+        GLOBAL_STATE->valid_jobs = calloc(128, sizeof(uint8_t));
+        if (GLOBAL_STATE->valid_jobs == NULL) {
+            ESP_LOGE(TAG, "Failed to allocate valid_jobs buffer");
+        }
+    }
+
+    module->shares_submitted = 0;
     module->shares_accepted = 0;
     module->shares_rejected = 0;
+    module->last_share_submitted_at_us = 0;
+    module->last_share_accepted_at_us = 0;
     module->best_nonce_diff = nvs_config_get_u64(NVS_CONFIG_BEST_DIFF);
     module->best_session_nonce_diff = 0;
     module->start_time = esp_timer_get_time();
@@ -57,7 +91,6 @@ void SYSTEM_init_system(GlobalState * GLOBAL_STATE)
     // Initialize network address strings
     strcpy(module->ip_addr_str, "");
     strcpy(module->ipv6_addr_str, "");
-    strcpy(module->wifi_status, "Initializing...");
     
     // set the pool url
     module->pool_url = nvs_config_get_string(NVS_CONFIG_STRATUM_URL);
@@ -119,8 +152,12 @@ void SYSTEM_init_system(GlobalState * GLOBAL_STATE)
     module->overheat_mode = nvs_config_get_bool(NVS_CONFIG_OVERHEAT_MODE);
     ESP_LOGI(TAG, "Initial overheat_mode value: %d", module->overheat_mode);
 
-    module->mining_paused = false;
+    // Start paused: the power management task owns mining start and only
+    // starts once app_main has decided at network-ready time (or the gate opens).
+    module->mining_paused = true;
+    module->mining_started_at_us = 0;
     module->pools_unavailable = false;
+    module->stratum_connected = false;
 
     //Initialize power_fault fault mode
     module->power_fault = 0;
@@ -146,49 +183,82 @@ void SYSTEM_init_system(GlobalState * GLOBAL_STATE)
     GLOBAL_STATE->stratum_mux = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
 }
 
-void SYSTEM_init_versions(GlobalState * GLOBAL_STATE) {
-    const esp_app_desc_t *app_desc = esp_app_get_description();
-    
-    // Store the firmware version
-    GLOBAL_STATE->SYSTEM_MODULE.version = strdup(app_desc->version);
-    if (GLOBAL_STATE->SYSTEM_MODULE.version == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for version");
-        GLOBAL_STATE->SYSTEM_MODULE.version = strdup("Unknown");
+void SYSTEM_mark_mining_started(GlobalState * GLOBAL_STATE)
+{
+    if (GLOBAL_STATE == NULL) {
+        return;
     }
     
-    // Read AxeOS version from SPIFFS
-    FILE *f = fopen("/version.txt", "r");
-    if (f == NULL) {
-        ESP_LOGW(TAG, "Failed to open /version.txt");
-        GLOBAL_STATE->SYSTEM_MODULE.axeOSVersion = strdup("Unknown");
-    } else {
-        char version[64];
-        if (fgets(version, sizeof(version), f) == NULL) {
-            ESP_LOGW(TAG, "Failed to read version from /version.txt");
-            GLOBAL_STATE->SYSTEM_MODULE.axeOSVersion = strdup("Unknown");
-        } else {
-            // Remove trailing newline if present
-            size_t len = strlen(version);
-            if (len > 0 && version[len - 1] == '\n') {
-                version[len - 1] = '\0';
-            }
-            GLOBAL_STATE->SYSTEM_MODULE.axeOSVersion = strdup(version);
-            if (GLOBAL_STATE->SYSTEM_MODULE.axeOSVersion == NULL) {
-                ESP_LOGE(TAG, "Failed to allocate memory for axeOSVersion");
-                GLOBAL_STATE->SYSTEM_MODULE.axeOSVersion = strdup("Unknown");
+    if (GLOBAL_STATE->SYSTEM_MODULE.mining_started_at_us <= 0) {
+        GLOBAL_STATE->SYSTEM_MODULE.mining_started_at_us = esp_timer_get_time();
             }
         }
-        fclose(f);
+
+void SYSTEM_mark_mining_stopped(GlobalState * GLOBAL_STATE)
+{
+    if (GLOBAL_STATE == NULL) {
+        return;
     }
     
-    ESP_LOGI(TAG, "Firmware Version: %s", GLOBAL_STATE->SYSTEM_MODULE.version);
-    ESP_LOGI(TAG, "AxeOS Version: %s", GLOBAL_STATE->SYSTEM_MODULE.axeOSVersion);
+    GLOBAL_STATE->SYSTEM_MODULE.mining_started_at_us = 0;
+}
 
-    if (strcmp(GLOBAL_STATE->SYSTEM_MODULE.version, GLOBAL_STATE->SYSTEM_MODULE.axeOSVersion) != 0) {
-        ESP_LOGE(TAG, "Firmware (%s) and AxeOS (%s) versions do not match. Please make sure to update both www.bin and esp-miner.bin.", 
-            GLOBAL_STATE->SYSTEM_MODULE.version, 
-            GLOBAL_STATE->SYSTEM_MODULE.axeOSVersion);
+void SYSTEM_reload_stratum_settings_from_nvs(GlobalState * GLOBAL_STATE)
+{
+    if (GLOBAL_STATE == NULL) {
+        return;
     }
+
+    SystemModule *module = &GLOBAL_STATE->SYSTEM_MODULE;
+
+    free_retired_runtime_strings();
+    replace_runtime_string(&module->pool_url, nvs_config_get_string(NVS_CONFIG_STRATUM_URL));
+    replace_runtime_string(&module->fallback_pool_url, nvs_config_get_string(NVS_CONFIG_FALLBACK_STRATUM_URL));
+
+    module->pool_port = nvs_config_get_u16(NVS_CONFIG_STRATUM_PORT);
+    module->fallback_pool_port = nvs_config_get_u16(NVS_CONFIG_FALLBACK_STRATUM_PORT);
+
+    module->pool_tls = nvs_config_get_u16(NVS_CONFIG_STRATUM_TLS);
+    module->fallback_pool_tls = nvs_config_get_u16(NVS_CONFIG_FALLBACK_STRATUM_TLS);
+
+    replace_runtime_string(&module->pool_user, nvs_config_get_string(NVS_CONFIG_STRATUM_USER));
+    replace_runtime_string(&module->fallback_pool_user, nvs_config_get_string(NVS_CONFIG_FALLBACK_STRATUM_USER));
+
+    replace_runtime_string(&module->pool_pass, nvs_config_get_string(NVS_CONFIG_STRATUM_PASS));
+    replace_runtime_string(&module->fallback_pool_pass, nvs_config_get_string(NVS_CONFIG_FALLBACK_STRATUM_PASS));
+
+    replace_runtime_string(&module->pool_cert, nvs_config_get_string(NVS_CONFIG_STRATUM_CERT));
+    replace_runtime_string(&module->fallback_pool_cert, nvs_config_get_string(NVS_CONFIG_FALLBACK_STRATUM_CERT));
+
+    module->pool_difficulty = nvs_config_get_u16(NVS_CONFIG_STRATUM_DIFFICULTY);
+    module->fallback_pool_difficulty = nvs_config_get_u16(NVS_CONFIG_FALLBACK_STRATUM_DIFFICULTY);
+
+    module->pool_extranonce_subscribe = nvs_config_get_bool(NVS_CONFIG_STRATUM_EXTRANONCE_SUBSCRIBE);
+    module->fallback_pool_extranonce_subscribe = nvs_config_get_bool(NVS_CONFIG_FALLBACK_STRATUM_EXTRANONCE_SUBSCRIBE);
+
+    module->pool_decode_coinbase_tx = nvs_config_get_bool(NVS_CONFIG_STRATUM_DECODE_COINBASE_TX);
+    module->fallback_pool_decode_coinbase_tx = nvs_config_get_bool(NVS_CONFIG_FALLBACK_STRATUM_DECODE_COINBASE_TX);
+
+    module->use_fallback_stratum = nvs_config_get_bool(NVS_CONFIG_USE_FALLBACK_STRATUM);
+    module->is_using_fallback = module->use_fallback_stratum;
+
+    char *primary_proto = nvs_config_get_string(NVS_CONFIG_STRATUM_PROTOCOL);
+    stratum_protocol_t primary = stratum_protocol_from_string(primary_proto);
+    if (primary != STRATUM_PROTOCOL_UNKNOWN) {
+        GLOBAL_STATE->stratum_protocol = primary;
+    } else {
+        ESP_LOGW(TAG, "Ignoring invalid primary stratum protocol in NVS: '%s'", primary_proto != NULL ? primary_proto : "NULL");
+    }
+    free(primary_proto);
+
+    char *fallback_proto = nvs_config_get_string(NVS_CONFIG_FALLBACK_STRATUM_PROTOCOL);
+    stratum_protocol_t fallback = stratum_protocol_from_string(fallback_proto);
+    if (fallback != STRATUM_PROTOCOL_UNKNOWN) {
+        module->fallback_pool_protocol = fallback;
+    } else {
+        ESP_LOGW(TAG, "Ignoring invalid fallback stratum protocol in NVS: '%s'", fallback_proto != NULL ? fallback_proto : "NULL");
+    }
+    free(fallback_proto);
 }
 
 esp_err_t SYSTEM_init_peripherals(GlobalState * GLOBAL_STATE) {
@@ -199,31 +269,6 @@ esp_err_t SYSTEM_init_peripherals(GlobalState * GLOBAL_STATE) {
         return ret;
     }
 
-    ret = display_init(GLOBAL_STATE);
-    if (ret != ESP_OK) {
-        self_test_show_message(GLOBAL_STATE, "DISPLAY:FAIL");
-        ESP_LOGE(TAG, "Display init failed");
-        return ret;
-    }
-
-    if (!GLOBAL_STATE->SELF_TEST_MODULE.is_active) {
-        ret = input_init(screen_button_press, toggle_wifi_softap);
-    } else {
-        ret = input_init(NULL, self_test_reset);
-    }
-    if (ret != ESP_OK) {
-        self_test_show_message(GLOBAL_STATE, "INPUT:FAIL");
-        ESP_LOGE(TAG, "Input init failed");
-        return ret;
-    }
-
-    ret = screen_start(GLOBAL_STATE);
-    if (ret != ESP_OK) {
-        self_test_show_message(GLOBAL_STATE, "SCREEN:FAIL");
-        ESP_LOGE(TAG, "Screen start failed");
-        return ret;
-    }
-
     ret = ensure_overheat_mode_config();
     if (ret != ESP_OK) {
         self_test_show_message(GLOBAL_STATE, "CONFIG:FAIL");
@@ -231,14 +276,6 @@ esp_err_t SYSTEM_init_peripherals(GlobalState * GLOBAL_STATE) {
         return ret;
     }
 
-    ret = filesystem_init(GLOBAL_STATE);
-    if (ret != ESP_OK) {
-        self_test_show_message(GLOBAL_STATE, "FILESYS:FAIL");
-        ESP_LOGE(TAG, "Filesystem init failed");
-        if (GLOBAL_STATE->SELF_TEST_MODULE.is_active) {
-            return ret;
-        }
-    }
 
     // Initialize the core voltage regulator
     ret = VCORE_init(GLOBAL_STATE);
@@ -267,6 +304,8 @@ esp_err_t SYSTEM_init_peripherals(GlobalState * GLOBAL_STATE) {
         return ret;
     }
 
+    update_fan_speed(GLOBAL_STATE, 0.0f, "power_off");
+
     return ESP_OK;
 }
 
@@ -274,6 +313,12 @@ void SYSTEM_clean_jobs_queue(GlobalState * GLOBAL_STATE)
 {
     ESP_LOGI(TAG, "Clean Jobs: clearing queue");
     queue_clear(&GLOBAL_STATE->stratum_queue);
+
+    if (GLOBAL_STATE->valid_jobs == NULL) {
+        ESP_LOGW(TAG, "valid_jobs is not initialized yet, skip bitmap reset");
+        hashrate_monitor_reset_measurements(GLOBAL_STATE);
+        return;
+    }
 
     pthread_mutex_lock(&GLOBAL_STATE->valid_jobs_lock);
     for (int i = 0; i < 128; i = i + 4) {
@@ -290,6 +335,15 @@ void SYSTEM_notify_accepted_share(GlobalState * GLOBAL_STATE)
     SystemModule * module = &GLOBAL_STATE->SYSTEM_MODULE;
 
     module->shares_accepted++;
+    module->last_share_accepted_at_us = esp_timer_get_time();
+}
+
+void SYSTEM_notify_submitted_share(GlobalState * GLOBAL_STATE)
+{
+    SystemModule * module = &GLOBAL_STATE->SYSTEM_MODULE;
+
+    module->shares_submitted++;
+    module->last_share_submitted_at_us = esp_timer_get_time();
 }
 
 static int compare_rejected_reason_stats(const void *a, const void *b) {
@@ -303,6 +357,10 @@ void SYSTEM_notify_rejected_share(GlobalState * GLOBAL_STATE, char * error_msg)
     SystemModule * module = &GLOBAL_STATE->SYSTEM_MODULE;
 
     module->shares_rejected++;
+    if (error_msg == NULL || error_msg[0] == '\0') {
+        error_msg = "unknown";
+    }
+    mqtt_service_record_share_reject(error_msg);
 
     for (int i = 0; i < module->rejected_reason_stats_count; i++) {
         if (strncmp(module->rejected_reason_stats[i].message, error_msg, sizeof(module->rejected_reason_stats[i].message) - 1) == 0) {
@@ -311,7 +369,7 @@ void SYSTEM_notify_rejected_share(GlobalState * GLOBAL_STATE, char * error_msg)
         }
     }
 
-    if (module->rejected_reason_stats_count < sizeof(module->rejected_reason_stats)) {
+    if (module->rejected_reason_stats_count < sizeof(module->rejected_reason_stats) / sizeof(module->rejected_reason_stats[0])) {
         strncpy(module->rejected_reason_stats[module->rejected_reason_stats_count].message, 
                 error_msg, 
                 sizeof(module->rejected_reason_stats[module->rejected_reason_stats_count].message) - 1);

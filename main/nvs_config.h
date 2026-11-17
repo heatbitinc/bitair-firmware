@@ -6,9 +6,6 @@
 #include "esp_err.h"
 
 typedef enum {
-    NVS_CONFIG_WIFI_SSID,
-    NVS_CONFIG_WIFI_PASS,
-    NVS_CONFIG_HOSTNAME,
 
     NVS_CONFIG_STRATUM_PROTOCOL,   
     NVS_CONFIG_STRATUM_URL,
@@ -38,28 +35,13 @@ typedef enum {
     
     NVS_CONFIG_ASIC_FREQUENCY,
     NVS_CONFIG_ASIC_VOLTAGE,
-    NVS_CONFIG_OVERCLOCK_ENABLED,
     
-    NVS_CONFIG_DISPLAY,
-    NVS_CONFIG_ROTATION,
-    NVS_CONFIG_INVERT_SCREEN,
-    NVS_CONFIG_DISPLAY_TIMEOUT,
-    NVS_CONFIG_DISPLAY_OFFSET,
     
-    NVS_CONFIG_AUTO_FAN_SPEED,
-    NVS_CONFIG_MANUAL_FAN_SPEED,
-    NVS_CONFIG_MIN_FAN_SPEED,
-    NVS_CONFIG_TEMP_TARGET,
     NVS_CONFIG_OVERHEAT_MODE,
     
-    NVS_CONFIG_STATISTICS_FREQUENCY,
     
     NVS_CONFIG_BEST_DIFF,
     NVS_CONFIG_SELF_TEST,
-    NVS_CONFIG_SWARM,
-    NVS_CONFIG_THEME_SCHEME,
-    NVS_CONFIG_THEME_COLORS,
-    NVS_CONFIG_SCOREBOARD,
     
     NVS_CONFIG_BOARD_VERSION,
     NVS_CONFIG_DEVICE_MODEL,
@@ -82,7 +64,9 @@ typedef enum {
     NVS_CONFIG_SELF_TEST_TEMP_TARGET,
     NVS_CONFIG_SELF_TEST_TEMP_WARMUP,
     NVS_CONFIG_SELF_TEST_TEMP_MAX,
-    NVS_CONFIG_COUNT
+    NVS_HB_DEVICE_MODEL,
+    NVS_CONFIG_COUNT,
+
 } NvsConfigKey;
 
 typedef enum {
@@ -109,9 +93,6 @@ typedef struct {
     ConfigValue *value;
     int array_size; // Numbered entries
     ConfigValue default_value;
-    const char *rest_name;
-    int min;
-    int max;
 } Settings;
 
 esp_err_t nvs_config_init(void);
