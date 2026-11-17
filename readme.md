@@ -1,249 +1,84 @@
-[![](https://dcbadge.vercel.app/api/server/3E8ca2dkcC)](https://discord.gg/osmu)
+# Bitair firmware
 
-![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/bitaxeorg/esp-miner/total)
-![GitHub commit activity](https://img.shields.io/github/commit-activity/t/bitaxeorg/esp-miner)
-![GitHub contributors](https://img.shields.io/github/contributors/bitaxeorg/esp-miner)
-![Alt](https://repobeats.axiom.co/api/embed/70889479b1e002c18a184b05bc5cbf2ed3718579.svg "Repobeats analytics image")
+Firmware for the [Heatbit Bitair](https://heatbit.com/products/bitair): a quiet HEPA air purifier with a
+built-in 1.2 TH/s solo Bitcoin miner. A Bitmain BM1370 ASIC mines and an ESP32-S3 runs this firmware; the heat
+from the ASIC is used by the purifier.
 
-# ESP-Miner
-esp-miner is open source ESP32 firmware for the [Bitaxe](https://github.com/bitaxeorg/bitaxe)
+The firmware is a fork of [ESP-Miner](https://github.com/bitaxeorg/ESP-Miner), the open-source firmware of the
+[Bitaxe](https://github.com/bitaxeorg/bitaxe). The main board design is published separately:
+[heatbitinc/bitair-mainboard](https://github.com/heatbitinc/bitair-mainboard) (based on bitaxeGamma).
 
-If you are looking for premade images to load on your Bitaxe, check out the [latest release](https://github.com/bitaxeorg/ESP-Miner/releases/latest) page. Maybe you want [instructions](https://github.com/bitaxeorg/ESP-Miner/blob/master/flashing.md) for loading factory images.
+What Bitair adds on top of ESP-Miner:
 
-# Bitaxetool
-We also have a command line python tool for flashing Bitaxe and updating the config called Bitaxetool 
+- power and fan mode from the device display (PWM input), indication LED, air quality and climate sensors;
+- Wi-Fi provisioning over BLE from the Heatbit app;
+- the Heatbit cloud: telemetry, remote control, pool settings, OTA updates, all over mutual TLS;
+- temperature-driven frequency control and fault handling for continuous quiet operation inside the purifier.
 
-**Bitaxetool Requires Python3.4 or later and pip**
+The ESP-Miner web UI (AxeOS), HTTP API and display support are not part of this firmware.
 
-Install bitaxetool from pip. pip is included with Python 3.4 but if you need to install it check <https://pip.pypa.io/en/stable/installation/>
+See [ARCHITECTURE.md](ARCHITECTURE.md) for how the firmware is organised and [AGENTS.md](AGENTS.md) for build,
+flash and test commands.
 
-```
-pip install --upgrade bitaxetool
-```
-The bitaxetool includes all necessary library for flashing the binaries to the Bitaxe Hardware.
+## Building
 
-**Notes**
- - The bitaxetool does not work properly with esptool v5.x.x, esptool v4.9.0 or earlier is required.
- - Bitaxetool v0.6.1 - locked to using esptool v4.9.0
-
-```
-pip install bitaxetool==0.6.1
-```
-
-- Flash a "factory" image to a Bitaxe to reset to factory settings. Make sure to choose an image built for your hardware version (401) in this case:
-
-```
-bitaxetool --firmware ./esp-miner-factory-401-v2.4.2.bin
-```
-- Flash just the NVS config to a bitaxe:
-
-```
-bitaxetool --config ./config-401.cvs
-```
-- Flash both a factory image _and_ a config to your Bitaxe: note the settings in the config file will overwrite the config already baked into the factory image:
-
-```
-bitaxetool --config ./config-401.cvs --firmware ./esp-miner-factory-401-v2.4.2.bin
-```
-
-## AxeOS API
-The esp-miner UI is called AxeOS and provides an API to expose actions and information.
-
-For more details take a look at [`main/http_server/openapi.yaml`](./main/http_server/openapi.yaml).
-
-Available API endpoints:
-  
-**GET**
-
-* `/api/system/info` Get system information
-* `/api/system/asic` Get ASIC settings information
-* `/api/system/statistics` Get system statistics (data logging should be activated)
-* `/api/system/statistics/dashboard` Get system statistics for dashboard
-* `/api/system/scoreboard` Get top 20 highest difficulty shares
-* `/api/system/wifi/scan` Scan for available Wi-Fi networks
-* `/api/system/logs` Download system logs
-
-**POST**
-
-* `/api/system/restart` Restart the system
-* `/api/system/identify` Identify the device
-* `/api/system/OTA` Update system firmware
-* `/api/system/OTAWWW` Update AxeOS
-
-**PATCH**
-
-* `/api/system` Update system settings
-
-**WEBSOCKETS**
-
-* `/api/ws` Text stream log
-* `/api/ws/live` JSONp stream of partial system info updates
-
-### API examples in `curl`:
+Requirements: [ESP-IDF v5.5.4](https://docs.espressif.com/projects/esp-idf/en/v5.5.4/esp32s3/get-started/) and
+the git submodules.
 
 ```bash
-# Get system information
-curl http://YOUR-BITAXE-IP/api/system/info
-
-# Get ASIC settings information
-curl http://YOUR-BITAXE-IP/api/system/asic
-
-# Get system statistics
-curl http://YOUR-BITAXE-IP/api/system/statistics
-
-# Get dashboard statistics
-curl http://YOUR-BITAXE-IP/api/system/statistics/dashboard
-
-# Get available Wi-Fi networks
-curl http://YOUR-BITAXE-IP/api/system/wifi/scan
-
-# Download system logs
-curl http://YOUR-BITAXE-IP/api/system/logs
-
-
-# Restart the system
-curl -X POST http://YOUR-BITAXE-IP/api/system/restart
-
-# Pause mining
-curl -X POST http://YOUR-BITAXE-IP/api/system/pause
-
-# Resume mining
-curl -X POST http://YOUR-BITAXE-IP/api/system/resume
-
-# Let the device say Hi!
-curl -X POST http://YOUR-BITAXE-IP/api/system/identify
-
-# Update system firmware
-curl -X POST \
-     -H "Content-Type: application/octet-stream" \
-     --data-binary "@esp-miner.bin" \
-     http://YOUR-BITAXE-IP/api/system/OTA
-
-# Update AxeOS
-curl -X POST \
-     -H "Content-Type: application/octet-stream" \
-     --data-binary "@www.bin" \
-     http://YOUR-BITAXE-IP/api/system/OTAWWW
-
-
-# Update system settings
-curl -X PATCH http://YOUR-BITAXE-IP/api/system \
-     -H "Content-Type: application/json" \
-     -d '{"fanspeed": "desired_speed_value"}'
-
-# Stream logs
-websocat ws://YOUR-BITAXE-IP/api/ws
-
-# Stream Info API
-websocat ws://YOUR-BITAXE-IP/api/ws/live
+git clone --recursive <repository>
+cd <repository>
+idf.py build merge_bins
 ```
 
-## Administration
+`merge_bins` writes `build/bitair-miner_full.bin` (bootloader, partition table and application).
 
-The firmware hosts a small web server on port 80 for administrative purposes. Once the Bitaxe device is connected to the local network, the admin web front end may be accessed via a web browser connected to the same network at `http://<IP>`, replacing `IP` with the LAN IP address of the Bitaxe device, or `http://bitaxe`, provided your network supports mDNS configuration.
+The Heatbit cloud endpoints are not part of this repository. Without them the firmware builds and mines with the
+pool settings stored on the device, but does not connect to the cloud. To point a build at a backend, copy
+`sdkconfig.defaults.heatbit.example` to `sdkconfig.defaults.heatbit` and fill it in.
 
-### Recovery
+Production builds also add `sdkconfig.defaults.security` (Secure Boot, Flash Encryption, NVS encryption). Read
+the warning at the top of that file before using it.
 
-In the event that the admin web front end is inaccessible, for example because of an unsuccessful firmware update (`www.bin`), a recovery page can be accessed at `http://<IP>/recovery`.
+## Device identity
 
-### Unlock Settings
+Each Bitair is provisioned at manufacturing: its UUID, worker ID and client certificate are written into NVS.
+The firmware uses the certificate for every connection to the cloud and renews it before it expires. Never erase
+the NVS partition (`0x9000`) or the whole flash of a real device: the identity cannot be recreated.
 
-In order to unlock the Input fields for ASIC Frequency and ASIC Core Voltage you need to append `?oc` to the end of the settings tab URL in your browser. Be aware that without additional cooling overclocking can overheat and/or damage your Bitaxe.
+## Installing your own firmware
 
-## Development using esp-miner/devcontainer
+You can build this firmware, change it and install it on your own Bitair: see
+[doc/installing-your-own-firmware.md](doc/installing-your-own-firmware.md). On a provisioned device write only
+the application, so NVS and the device identity stay intact.
 
-This configuration allows you to edit locally and compile the source code using a docker container so you don't have to install the ESP-IDF toolchain and other supporting software on your computer to compile the firmware.
+Programming a blank main board (power, connectors, download mode, merged image) is described in
+[FLASHING_BITAIR_MAINBOARD.md](FLASHING_BITAIR_MAINBOARD.md).
 
-### Prerequisites
+## Privacy
 
-- Docker server
+The device sends to the Heatbit cloud:
 
-### Local PC Setup
+- device identifiers (UUID), firmware version and security state (Secure Boot, Flash Encryption, certificate
+  expiry);
+- mining statistics: hashrate, shares, pool difficulty, ASIC frequency, voltage, temperatures and power;
+- device state: power, fan and work mode, sensor readings (temperature, humidity, CO2, TVOC);
+- network state: Wi-Fi SSID, signal strength and the local IP address.
 
-These instructions will assume an installation to your home directory.
-```
-cd ~
-git clone --recursive https://github.com/bitaxeorg/ESP-MINER.git
-cd ESP-MINER
-git checkout <the branch you want>
-git submodule update --init --recursive
-# The next step builds the docker container that will compile the source code
-# This will take several minutes to finish
-docker build -t espminer-build .devcontainer
-```
-### Building
+The Wi-Fi password and the pool password are not sent. Device logs stay on the serial port.
 
-```
-cd ~/ESP-MINER
-docker run --rm -it -v $PWD:/workspace espminer-build /bin/bash
-git config --global --add safe.directory /workspace    # set git permissions or build will fail; only done once
-cd /workspace
-idf.py build
-```	
-Once the build is done exit out of the docker session and flash the new firmware.
+## Wi-Fi routers
 
-## Development
+Some Wi-Fi routers block mining traffic, for example ASUS routers (AiProtection, IoT protection) and some
+TP-Link models. If the device connects but does not mine, check those settings and the pool host and port.
 
-### Prerequisites
+## License
 
-- Install the ESP-IDF toolchain from https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/
-- Install nodejs/npm from https://nodejs.org/en/download
-- (Optional) Install the ESP-IDF extension for VSCode from https://marketplace.visualstudio.com/items?itemName=espressif.esp-idf-extension
+Copyright (C) 2025-2026 Heatbit Inc. Based on ESP-Miner, copyright the ESP-Miner contributors.
 
-### Cloning
+This firmware is licensed under the GNU General Public License version 3, see [LICENSE](LICENSE). It is
+distributed WITHOUT ANY WARRANTY; see the license for details. [NOTICE](NOTICE) lists the upstream commit and
+what Heatbit changed.
 
-This project uses git submodules (e.g. libsecp256k1). Clone with `--recursive`:
-```
-git clone --recursive https://github.com/bitaxeorg/ESP-Miner.git
-```
-
-If you already have a checkout, initialize the submodules with:
-```
-git submodule update --init --recursive
-```
-
-### Building
-
-At the root of the repository, run:
-```
-idf.py build && ./merge_bin.sh ./esp-miner-merged.bin
-```
-
-Note: the merge_bin.sh script is a custom script that merges the bootloader, partition table, and the application binary into a single file.
-
-Note: if using VSCode, you may have to configure the settings.json file to match your esp hardware version. For example, if your bitaxe has something other than an esp32-s3, you will need to change the version in the `.vscode/settings.json` file.
-
-### Flashing
-
-With the bitaxe connected to your computer via USB, run:
-
-```
-bitaxetool --config ./config-xxx.cvs --firmware ./esp-miner-merged.bin
-```
-
-where xxx is the config file for your hardware version. You can see the list of available config files in the root of the repository.
-
-A custom board version is also possible with `config-custom.cvs`. A custom board needs to be based on an existing `devicemodel` and `asicmodel`.
-
-**Notes:** 
-  - If you are developing within a dev container, you will need to run the bitaxetool command from outside the container. Otherwise, you will get an error about the device not being found.
-  - Some Bitaxe versions can't directly connect to a USB-C port. If yours is affected use a USB-A adapter as a workaround. More about it [here](https://github.com/bitaxeorg/bitaxeGamma/issues/37).
-  - Only ESP32-S3-WROOM-1 module type N16R8 (16MB Flash, 8MB Octal SPI PSRAM) is supported. This model number should be visible on the ESP32 module. Other module types without PSRAM or with Quad SPI PSRAM will not work with the normal firmware. More about it [here](https://github.com/bitaxeorg/ESP-Miner/issues/826).
-
-### Wi-Fi routers
-
-There are some Wi-Fi routers that will block mining, ASUS Wi-Fi routers & some TP-Link Wi-Fi routers for example.
-If you find that your not able to mine / have no hash rate you will need to check the Wi-Fi routers settings and disable the following;
-
-1/ AiProtection
-
-2/ IoT 
-
-If your Wi-Fi router has both of these options you might have to disable them both.
-
-If your still having problems here, check other settings within the Wi-Fi router and the bitaxe device, this includes the URL for
-the Stratum Host and Stratum Port.
-
-## Attributions
-
-The display font is Portfolio 6x8 from https://int10h.org/oldschool-pc-fonts/ by VileR.
+"Heatbit", "Bitair" and the Heatbit logo are trademarks of Heatbit Inc. and are not covered by the license.
+Bitaxe is a trademark of bitaxeorg; this is not an official Bitaxe product and is not endorsed by bitaxeorg.

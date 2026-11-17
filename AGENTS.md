@@ -1,97 +1,59 @@
-# ESP-Miner Development Guide for Agents
+# Guide for coding agents
 
-Welcome to the ESP-Miner repository. This document provides a high-level overview of the project structure, build instructions, and CI setup to help you navigate and contribute effectively.
+Bitair firmware: ESP-IDF firmware for the Heatbit Bitair air purifier with a built-in Bitcoin miner (ESP32-S3, BM1370), forked from
+[ESP-Miner](https://github.com/bitaxeorg/ESP-Miner). Read [ARCHITECTURE.md](ARCHITECTURE.md) first: it describes
+the components, the startup sequence and where each concern lives.
 
-## Project Overview
-ESP-Miner is the firmware powering the Bitaxe open-source Bitcoin ASIC miners. It is built on the ESP-IDF framework (v5.x+) for the ESP32-S3 and includes a modern web interface (Axe-OS) built with Angular.
+## Build
 
-## Repository Structure
+ESP-IDF v5.5.4 (the version CI uses). Submodules are required (`libsecp256k1`):
 
-```text
-.
-├── .github/workflows/          # CI/CD pipelines (GitHub Actions)
-├── bootloader_components/      # Custom components for the 2nd stage bootloader
-├── components/                 # Shared application components (asic, stratum, etc.)
-├── main/                       # Main application source code
-│   └── http_server/            # C-based HTTP server logic
-│       └── axe-os/             # Axe-OS Angular Frontend
-├── config-*.cvs                # Hardware-specific configuration files
-├── partitions.csv              # Flash partition layout
-└── sdkconfig                   # Project-wide ESP-IDF configuration
-```
-
-## Build Instructions
-
-### 1. Firmware (Main Project)
-The project uses the standard ESP-IDF build system. Ensure you are using ESP-IDF v5.5.1 (or compatible).
-
-**Prerequisites:**
-- ESP-IDF v5.5.1 environment sourced.
-- Node.js (v22+) and npm for the frontend bundle.
-
-**Commands:**
 ```bash
-# Source the environment
-. ~/esp/v5.5.1/esp-idf/export.sh
-
-# Build the project (automatically builds Axe-OS and generates binaries)
-idf.py build
-
-# Flash to device
-idf.py build flash
+git submodule update --init --recursive
+. <esp-idf>/export.sh
+idf.py build                 # firmware
+idf.py build merge_bins      # also build/bitair-miner_full.bin (bootloader + partition table + app)
 ```
-*Note: The Axe-OS frontend is automatically built and compressed into `www.bin` as part of the main `idf.py build` process.*
 
-### 2. Axe-OS (Frontend)
-The frontend is a standalone Angular application located in `main/http_server/axe-os`.
+`sdkconfig.defaults.heatbit` (backend endpoints, not in git) is added automatically when present. Without it the
+firmware builds but is not configured for the Heatbit cloud; `sdkconfig.defaults.heatbit.example` is the
+template.
 
-**Commands:**
+Release builds have all logs off (`CONFIG_LOG_DEFAULT_LEVEL_NONE`). For debugging, build with a higher log level
+in a separate build directory.
+
+## Flash
+
+`idf.py -p <port> flash` writes the bootloader, partition table, app and otadata. It does not touch NVS.
+
+**Never run `idf.py erase-flash` or erase the NVS partition (`0x9000`) on a real device**: it holds the device
+UUID, worker ID and certificate, written at manufacturing: the device's identity on the backend. It cannot be
+recreated by the firmware.
+
+## Tests
+
+Unity tests are in `components/<name>/test`. Build and run them on an ESP32-S3:
+
 ```bash
-cd main/http_server/axe-os
-npm install
-
-# Build only the frontend
-npm run build
-
-# Run local development server
-npm run start
+idf.py -C test-ci -B build-test -D IDF_TARGET=esp32s3 build
+python -m esptool --chip esp32s3 -p <port> write_flash 0x10000 build-test/unit_test_stratum.bin
+idf.py -p <port> monitor     # prints "N Tests 0 Failures"
 ```
 
-## Testing
+Writing only the app at `0x10000` keeps the device's bootloader, partition table and NVS; flash the firmware
+again afterwards. Pure logic is easier to test on the host (see `main/thermal/thermal_governor.c`).
 
-### Internal C Components
-Firmware unit tests are located in the `test/` directory.
-```bash
-idf.py build test
-```
+## Rules
 
-### Axe-OS Frontend
-Angular unit tests use Karma and Jasmine. We use a specific CI command for CI environments which ensures consistent reporting and uses a headless browser.
-
-**Execution:**
-```bash
-cd main/http_server/axe-os
-npm run test:ci
-```
-
-**Key Points:**
-- `npm run test:ci` automatically runs `npm run generate:api` before executing `ng test`.
-- It uses a custom `ChromeHeadlessCI` launcher (defined in `karma.conf.js`) with `--no-sandbox` to ensure stability in containerized CI environments.
-- Unit tests are highly isolated. **Reminder:** Components with many dependencies (like `HomeComponent`) must have all services, pipes, and sub-components explicitly declared or provided in the `TestBed`.
-
-## CI/CD Setup
-
-We use GitHub Actions for automated testing and releases.
-
-### Key Workflows:
-- **`unittest.yml`**: Runs both backend and frontend unit tests in parallel.
-- **`build.yml`**: Verifies that the project compiles for all primary configurations.
-- **`release.yml`**: Handles automated releases and binary packaging.
-
-## AI Agent Tips
-- **API Generation**: If you modify `openapi.yaml`, you **must** run `npm run generate:api` in the `axe-os` directory to update the TypeScript services. This is also automatically handled by `npm run build` and `npm run test:ci`.
-- **Node Environment**: If `node` or `npm` are not in your global path, check for local installations in `~/.nvm`. You can source them using `export PATH=~/.nvm/versions/node/v[version]/bin:$PATH`.
-- **Modern Angular Testing**: Use functional providers like `provideRouter([])` and `provideHttpClient()` instead of deprecated class-based modules like `RouterTestingModule`.
-- **PSRAM**: Bitaxe heavily relies on PSRAM. Always check `esp_psram_is_initialized()` before allocating large buffers in the backend.
-- **Mock Data Parity**: When updating `openapi.yaml` and regenerating the API, you **must** update the mock data in `main/http_server/axe-os/src/app/services/system.service.ts`. The TypeScript compiler will fail if properties are missing from the `of()` calls used for development.
-- **API Type Safety**: The `SystemInfo` API uses a numeric 0/1 pattern for many boolean-like status fields (e.g., `overclockEnabled`, `overheat_mode`). In the backend, use `cJSON_AddNumberToObject(root, "key", val ? 1 : 0)` to maintain parity with the `integer` types in OpenAPI and support strict equality checks (`=== 1`) in the Angular frontend.
+- Components never include headers from `main/`. When a component needs application data or actions, add a
+  small interface (listener, provider, callback) and register it from `main/` (see ARCHITECTURE.md).
+- Backend credentials and TLS settings belong in `components/backend_auth` only. Every channel uses mutual TLS
+  with the device certificate.
+- Backend hosts, paths and other internal values are Kconfig options without defaults, set in
+  `sdkconfig.defaults.heatbit`; never hard-code them. Never commit keys or certificates (`certs/` is ignored).
+- Only the power management task starts or stops mining. Faults stop it with `STOP_IMMEDIATE`.
+- Do not log secrets: pool passwords, credentials, tokens, keys.
+- Keep `sdkconfig.defaults` minimal: only settings that differ from defaults, grouped and commented
+  (`idf.py save-defconfig` produces the minimal set).
+- Changes to upstream files (`main/tasks`, `components/asic`, ...) should stay small so upstream fixes can still
+  be merged; put Bitair behaviour in Bitair files where possible.
