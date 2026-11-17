@@ -1,0 +1,30 @@
+menu "Device identity"
+
+    config HEATBIT_DEVICE_TYPE
+        string "Device type reported at enrollment"
+        default "bitair"
+
+    config HEATBIT_DEVICES_DNS_SUFFIX
+        string "Device certificate DNS suffix"
+        default ""
+        help
+            The device certificate names <device_uuid>.<suffix> in CN and SAN.
+
+    config HEATBIT_ENROLL_ENABLED
+        bool "Renew the device client certificate"
+        default n
+        help
+            Before the device certificate expires, the device generates a new
+            EC P-256 key, sends a CSR to the enrollment service (authenticated
+            with the current certificate) and stores the new certificate in
+            NVS. Requires certs/ca_root.pem: the root CA that signed the
+            enrollment server certificate.
+
+    config HEATBIT_ENROLL_URL
+        string "Enrollment URL"
+        depends on HEATBIT_ENROLL_ENABLED
+        default ""
+        help
+            Full URL of the enrollment endpoint.
+
+endmenu

@@ -1,0 +1,29 @@
+file(GLOB SRC_FILES *.c)
+idf_component_register(
+    SRCS
+      ${SRC_FILES}
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        "backend_auth"
+        "bitair_hw"
+        "device_identity"
+        "device_state"
+        "wifi_manager"
+        "app_update"
+        "bootloader_support"
+        "efuse"
+        "esp_bootloader_format"
+        "esp_app_format"
+        "esp_event"
+        "esp_http_client"
+        "mqtt"
+        "ota_update"
+        "esp_netif"
+        "esp_websocket_client"
+        "esp_wifi"
+        "json"
+        "lwip"
+        "mbedtls"
+        "nvs_flash"
+)

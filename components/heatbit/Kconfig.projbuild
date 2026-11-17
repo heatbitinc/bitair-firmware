@@ -1,0 +1,76 @@
+menu "Heatbit Configuration"
+
+    comment "Backend endpoints have no defaults: set them in sdkconfig.defaults.heatbit"
+
+    config HEATBIT_API_HOST
+        string "Heatbit API host"
+        default ""
+        help
+            Hostname of the Heatbit API backend, used for all REST and
+            WebSocket URLs.
+
+    config HEATBIT_API_METRICS_PATH
+        string "Metrics path"
+        default ""
+        help
+            Path of the metrics endpoint, appended to the API host.
+
+    config HEATBIT_API_POOL_CONFIG_PATH
+        string "Pool config path"
+        default ""
+        help
+            Path of the pool configuration endpoint, appended to the API host.
+
+    config HEATBIT_API_WS_PATH
+        string "WebSocket port and path"
+        default ""
+        help
+            Port and path of the WebSocket endpoint, appended to the API host.
+
+    config HEATBIT_OTA_SERVER_URL
+        string "OTA server URL"
+        default ""
+        help
+            Base URL of the firmware update server. Leave empty to disable
+            update checks.
+
+    config HEATBIT_OTA_VERSION_PATH
+        string "OTA version path"
+        default ""
+        help
+            Path of the latest-version request, appended to the OTA server URL.
+
+    config HEATBIT_OTA_DOWNLOAD_PATH
+        string "OTA download path"
+        default ""
+        help
+            Path of the firmware image download, appended to the OTA server URL.
+
+    config HEATBIT_MQTT_BROKER_HOST
+        string "MQTT broker host"
+        default ""
+        help
+            Hostname or IPv4 address of the MQTT broker used for telemetry
+            and command channels.
+
+    config HEATBIT_MQTT_BROKER_PORT
+        int "MQTT broker port"
+        range 1 65535
+        default 8883
+        help
+            TLS MQTT broker port.
+
+    config HEATBIT_MQTT_TELEMETRY_TOPIC
+        string "MQTT telemetry topic"
+        default ""
+        help
+            Topic the device publishes telemetry to. "%s" is replaced with the
+            device UUID.
+
+    config HEATBIT_MQTT_COMMANDS_TOPIC
+        string "MQTT commands topic"
+        default ""
+        help
+            Topic the device subscribes to for commands. "%s" is replaced with
+            the device UUID.
+endmenu

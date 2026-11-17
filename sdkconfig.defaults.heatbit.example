@@ -1,0 +1,20 @@
+# Template for sdkconfig.defaults.heatbit. Copy it, fill in the values and build:
+#   cp sdkconfig.defaults.heatbit.example sdkconfig.defaults.heatbit
+# Without this file the firmware builds, but cloud services and updates are off.
+# The values are not public.
+CONFIG_HEATBIT_API_HOST=""
+CONFIG_HEATBIT_API_METRICS_PATH=""
+CONFIG_HEATBIT_API_POOL_CONFIG_PATH=""
+CONFIG_HEATBIT_API_WS_PATH=""
+CONFIG_HEATBIT_OTA_SERVER_URL=""
+CONFIG_HEATBIT_OTA_VERSION_PATH=""
+CONFIG_HEATBIT_OTA_DOWNLOAD_PATH=""
+CONFIG_HEATBIT_MQTT_BROKER_HOST=""
+CONFIG_HEATBIT_MQTT_BROKER_PORT=8883
+CONFIG_HEATBIT_MQTT_TELEMETRY_TOPIC=""
+CONFIG_HEATBIT_MQTT_COMMANDS_TOPIC=""
+CONFIG_ESP_WIFI_SSID=""
+CONFIG_ESP_WIFI_PASSWORD=""
+# Device certificate renewal (needs certs/ca_root.pem)
+CONFIG_HEATBIT_DEVICES_DNS_SUFFIX=""
+# CONFIG_HEATBIT_ENROLL_ENABLED is not set
