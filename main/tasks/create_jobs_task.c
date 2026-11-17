@@ -22,9 +22,61 @@ static const char *TAG = "create_jobs_task";
 #define MAX_EXTRANONCE2_LEN 32
 #define MAX_EXTRANONCE2_STR (MAX_EXTRANONCE2_LEN * 2 + 1)
 
+static TaskHandle_t s_create_jobs_task_handle = NULL;
+static volatile bool s_create_jobs_task_pause_requested = false;
+
 static void generate_work(GlobalState *GLOBAL_STATE, mining_notify *notification, uint64_t extranonce_2, double difficulty);
 static void generate_work_sv2(GlobalState *GLOBAL_STATE, sv2_job_t *job, double difficulty);
 static void generate_work_sv2_ext(GlobalState *GLOBAL_STATE, sv2_ext_job_t *job, double difficulty, uint64_t extranonce_2_counter);
+
+static bool ensure_job_buffers(GlobalState *GLOBAL_STATE)
+{
+    if (GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs == NULL) {
+        GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs = heap_caps_calloc(128, sizeof(bm_job *), MALLOC_CAP_SPIRAM);
+        if (GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs == NULL) {
+            GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs = calloc(128, sizeof(bm_job *));
+        }
+    }
+
+    if (GLOBAL_STATE->valid_jobs == NULL) {
+        GLOBAL_STATE->valid_jobs = heap_caps_calloc(128, sizeof(uint8_t), MALLOC_CAP_SPIRAM);
+        if (GLOBAL_STATE->valid_jobs == NULL) {
+            GLOBAL_STATE->valid_jobs = calloc(128, sizeof(uint8_t));
+        }
+    }
+
+    if (GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs == NULL || GLOBAL_STATE->valid_jobs == NULL) {
+        ESP_LOGE(TAG, "Job buffers are not available (active_jobs=%p valid_jobs=%p)",
+                 (void *)GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs,
+                 (void *)GLOBAL_STATE->valid_jobs);
+        return false;
+    }
+
+    return true;
+}
+
+static bool create_jobs_task_should_pause(GlobalState *GLOBAL_STATE)
+{
+    return s_create_jobs_task_pause_requested || GLOBAL_STATE->SYSTEM_MODULE.mining_paused;
+}
+
+void create_jobs_task_pause(void)
+{
+    s_create_jobs_task_pause_requested = true;
+
+    if (s_create_jobs_task_handle != NULL) {
+        xTaskNotifyGive(s_create_jobs_task_handle);
+    }
+}
+
+void create_jobs_task_resume(void)
+{
+    s_create_jobs_task_pause_requested = false;
+
+    if (s_create_jobs_task_handle != NULL) {
+        xTaskNotifyGive(s_create_jobs_task_handle);
+    }
+}
 
 // Free a work item using the correct free function for the protocol it was created under
 static void free_work_item(GlobalState *GLOBAL_STATE, void *work, stratum_protocol_t protocol)
@@ -44,13 +96,21 @@ static void free_work_item(GlobalState *GLOBAL_STATE, void *work, stratum_protoc
 void create_jobs_task(void *pvParameters)
 {
     GlobalState *GLOBAL_STATE = (GlobalState *)pvParameters;
+    bool pause_logged = false;
 
-    // Initialize ASIC task module (moved from ASIC_task)
-    GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs = heap_caps_malloc(sizeof(bm_job *) * 128, MALLOC_CAP_SPIRAM);
-    GLOBAL_STATE->valid_jobs = heap_caps_malloc(sizeof(uint8_t) * 128, MALLOC_CAP_SPIRAM);
+    s_create_jobs_task_handle = xTaskGetCurrentTaskHandle();
+
+    if (!ensure_job_buffers(GLOBAL_STATE)) {
+        ESP_LOGW(TAG, "create_jobs_task waiting for memory");
+        while (!ensure_job_buffers(GLOBAL_STATE)) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
+
     for (int i = 0; i < 128; i++) {
-        GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs[i] = NULL;
+        if (GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs[i] == NULL) {
         GLOBAL_STATE->valid_jobs[i] = 0;
+    }
     }
 
     double difficulty = GLOBAL_STATE->pool_difficulty;
@@ -63,6 +123,26 @@ void create_jobs_task(void *pvParameters)
     ESP_LOGI(TAG, "ASIC Ready!");
 
     while (1) {
+        if (create_jobs_task_should_pause(GLOBAL_STATE)) {
+            if (!pause_logged) {
+                ESP_LOGI(TAG, "Pausing create_jobs_task");
+                free_work_item(GLOBAL_STATE, current_work, current_work_protocol);
+                current_work = NULL;
+                extranonce_2 = 0;
+                timeout_ms = ASIC_get_asic_job_frequency_ms(GLOBAL_STATE);
+                pause_logged = true;
+            }
+
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            continue;
+        }
+
+        if (pause_logged) {
+            ESP_LOGI(TAG, "Resuming create_jobs_task");
+            timeout_ms = ASIC_get_asic_job_frequency_ms(GLOBAL_STATE);
+            pause_logged = false;
+        }
+
         // Read protocol dynamically each iteration (coordinator may have switched it)
         stratum_protocol_t active_protocol = GLOBAL_STATE->stratum_protocol;
 
@@ -131,20 +211,9 @@ void create_jobs_task(void *pvParameters)
 
             extranonce_2 = 0;
 
-            // Check clean_jobs flag
-            bool clean;
-            if (current_work_protocol == STRATUM_PROTOCOL_V2) {
-                if (stratum_v2_is_extended_channel(GLOBAL_STATE)) {
-                    clean = ((sv2_ext_job_t *)current_work)->clean_jobs;
-                } else {
-                    clean = ((sv2_job_t *)current_work)->clean_jobs;
-                }
-            } else {
-                clean = ((mining_notify *)current_work)->clean_jobs;
-            }
-            if (!clean) {
-                continue;
-            }
+            // Always send newly dequeued work immediately.
+            // Some pools frequently set clean_jobs=false; deferring send until timeout
+            // can leave the ASIC idle and keep hashrate at zero for long intervals.
         } else {
             if (current_work == NULL) {
                 vTaskDelay(100 / portTICK_PERIOD_MS);
@@ -190,6 +259,11 @@ void create_jobs_task(void *pvParameters)
 
 static void generate_work(GlobalState *GLOBAL_STATE, mining_notify *notification, uint64_t extranonce_2, double difficulty)
 {
+    if (GLOBAL_STATE->extranonce_str == NULL) {
+        ESP_LOGW(TAG, "Extranonce is not initialized yet, skipping V1 work item");
+        return;
+    }
+
     if (GLOBAL_STATE->extranonce_2_len > MAX_EXTRANONCE2_LEN) {
         ESP_LOGE(TAG, "extranonce_2_len %d exceeds maximum %d, skipping job", GLOBAL_STATE->extranonce_2_len, MAX_EXTRANONCE2_LEN);
         return;

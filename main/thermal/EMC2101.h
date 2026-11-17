@@ -1,7 +1,8 @@
 #ifndef EMC2101_H_
 #define EMC2101_H_
 
-#include "i2c_bitaxe.h"
+#include <stdint.h>
+#include "esp_err.h"
 
 // TODO Make all these enums
 
@@ -164,7 +165,8 @@ typedef enum
 
 esp_err_t EMC2101_set_fan_speed(float);
 uint16_t EMC2101_get_fan_speed(void);
-esp_err_t EMC2101_init();
+esp_err_t EMC2101_init(int temp_offset_param);
+esp_err_t EMC2101_set_pwm_frequency_hz(uint32_t pwm_hz);
 float EMC2101_get_external_temp(void);
 float EMC2101_get_internal_temp(void);
 esp_err_t EMC2101_set_ideality_factor(uint8_t);

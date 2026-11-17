@@ -8,7 +8,7 @@
 #include "stratum_v2_task.h"
 #include "stratum_socket.h"
 #include "protocol_coordinator.h"
-#include "connect.h"
+#include "wifi_connect.h"
 #include "sv2_protocol.h"
 #include "sv2_noise.h"
 #include "nvs_config.h"
@@ -23,7 +23,7 @@
 #include <stdlib.h>
 
 #define MAX_RETRY_ATTEMPTS 3
-#define TRANSPORT_TIMEOUT_MS 5000
+#define TRANSPORT_TIMEOUT_MS 15000
 #define SV2_MAX_FRAME_SIZE 2048
 
 static const char *TAG = "stratum_v2_task";

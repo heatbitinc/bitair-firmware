@@ -17,6 +17,9 @@ void protocol_coordinator_notify_failure(void);
 // Resets the "all pools unreachable" failure counter and clears pools_unavailable.
 void protocol_coordinator_notify_success(void);
 
+// Called by runtime config updaters to force reconnect of the active stratum task.
+void protocol_coordinator_request_reconnect(void);
+
 // V1 task checks this to know when to shut down gracefully
 bool protocol_coordinator_v1_should_shutdown(void);
 

@@ -93,6 +93,21 @@ float Thermal_get_chip_temp(GlobalState * GLOBAL_STATE)
     return -1;
 }
 
+bool Thermal_chip_sensor_readable(GlobalState * GLOBAL_STATE)
+{
+    float temp = -1;
+    if (GLOBAL_STATE->DEVICE_CONFIG.EMC2101) {
+        temp = GLOBAL_STATE->DEVICE_CONFIG.emc_internal_temp ? EMC2101_get_internal_temp() : EMC2101_get_external_temp();
+    } else if (GLOBAL_STATE->DEVICE_CONFIG.EMC2103) {
+        temp = EMC2103_get_external_temp();
+    } else if (GLOBAL_STATE->DEVICE_CONFIG.TMP1075) {
+        temp = TMP1075_read_temperature(0);
+    } else {
+        return true; // no chip sensor on this board
+    }
+    return temp != -1;
+}
+
 float Thermal_get_chip_temp2(GlobalState * GLOBAL_STATE)
 {
     if (!GLOBAL_STATE->ASIC_initalized) {

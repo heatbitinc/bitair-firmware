@@ -11,6 +11,8 @@ uint16_t Thermal_get_fan_speed(DeviceConfig * DEVICE_CONFIG);
 uint16_t Thermal_get_fan2_speed(DeviceConfig * DEVICE_CONFIG);
 
 float Thermal_get_chip_temp(GlobalState * GLOBAL_STATE);
+/* Reads the chip temperature sensor even while the ASIC is off; true if it answered. */
+bool Thermal_chip_sensor_readable(GlobalState * GLOBAL_STATE);
 float Thermal_get_chip_temp2(GlobalState * GLOBAL_STATE);
 
 #endif // THERMAL_H

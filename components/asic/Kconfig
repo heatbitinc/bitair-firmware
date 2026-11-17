@@ -1,0 +1,17 @@
+menu "ASIC frequency transition"
+
+    config ASIC_FREQ_RAMP_STEP_MULT
+        int "Frequency ramp step, in 6.25 MHz units"
+        range 1 32
+        default 1
+        help
+            Frequency changes are applied in steps so the chip and the core
+            regulator follow the load change. A larger step makes start, stop
+            and live frequency changes faster.
+
+    config ASIC_FREQ_RAMP_STEP_DELAY_MS
+        int "Delay between frequency ramp steps (ms)"
+        range 10 1000
+        default 100
+
+endmenu

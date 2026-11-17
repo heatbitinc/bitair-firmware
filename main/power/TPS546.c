@@ -40,9 +40,51 @@ static float last_vin = 0.0f;
 static float last_iout = 0.0f;
 static float last_vout = 0.0f;
 static int last_temp = 0;
+static bool last_temp_read_ok = false;
+
+// Debounce transient status spikes so startup is not interrupted by one bad read.
+static uint8_t tps_fault_streak = 0;
+static uint8_t tps_clear_streak = 0;
+static bool tps_off_seen = false;
 
 
+static esp_err_t smb_read_byte(uint8_t command, uint8_t *data);
+static esp_err_t smb_read_word(uint8_t command, uint16_t *result);
+static float ulinear16_2_float(uint16_t value);
 static esp_err_t TPS546_parse_status(uint16_t);
+
+static void TPS546_log_power_state(const char *stage, float requested_vout)
+{
+    uint8_t operation = 0;
+    uint16_t status = 0;
+    uint16_t u16_value = 0;
+    float command_vout = 0.0f;
+    float read_vout = 0.0f;
+
+    if (smb_read_byte(PMBUS_OPERATION, &operation) != ESP_OK) {
+        ESP_LOGE(TAG, "[%s] Failed to read OPERATION", stage);
+        return;
+    }
+    if (smb_read_word(PMBUS_STATUS_WORD, &status) != ESP_OK) {
+        ESP_LOGE(TAG, "[%s] Failed to read STATUS_WORD", stage);
+        return;
+    }
+    if (smb_read_word(PMBUS_VOUT_COMMAND, &u16_value) == ESP_OK) {
+        command_vout = ulinear16_2_float(u16_value);
+    }
+    if (smb_read_word(PMBUS_READ_VOUT, &u16_value) == ESP_OK) {
+        read_vout = ulinear16_2_float(u16_value);
+    }
+
+    ESP_LOGW(TAG,
+             "[%s] req_vout=%.3fV OPERATION=0x%02X STATUS=0x%04X VOUT_CMD=%.3fV READ_VOUT=%.3fV",
+             stage,
+             requested_vout,
+             operation,
+             status,
+             command_vout,
+             read_vout);
+}
 
 /**
  * @brief SMBus read byte
@@ -713,12 +755,19 @@ int TPS546_get_temperature(void)
 
     if (smb_read_word(PMBUS_READ_TEMPERATURE_1, &value) != ESP_OK) {
         ESP_LOGE(TAG, "Could not read temperature");
+        last_temp_read_ok = false;
         return last_temp;
     }
     
     temp = slinear11_2_int(value);
     last_temp = temp;
+    last_temp_read_ok = true;
     return temp;
+}
+
+bool TPS546_temperature_read_ok(void)
+{
+    return last_temp_read_ok;
 }
 
 float TPS546_get_vin(void)
@@ -783,16 +832,73 @@ esp_err_t TPS546_check_status(GlobalState * GLOBAL_STATE) {
 
     SystemModule * SYSTEM_MODULE = &GLOBAL_STATE->SYSTEM_MODULE;
     uint16_t status;
+    float measured_vout = 0.0f;
+    bool off_unexpected;
+    bool has_critical_fault;
 
     ESP_RETURN_ON_ERROR(smb_read_word(PMBUS_STATUS_WORD, &status), TAG, "Failed to read STATUS_WORD");
-    //determine if this is a fault we care about
-    if (status & (TPS546_STATUS_OFF | TPS546_STATUS_VOUT_OV | TPS546_STATUS_IOUT_OC | TPS546_STATUS_VIN_UV | TPS546_STATUS_TEMP)) {
+    measured_vout = TPS546_get_vout();
+
+    // Treat OFF as a fault only when ASIC is expected to be powered.
+    // During boot/paused states OPERATION=OFF is normal and should not trigger recovery loops.
+    // Also gate OFF by measured VOUT to avoid reacting to transient/stale status bits
+    // immediately after regulator bring-up.
+    off_unexpected = (status & TPS546_STATUS_OFF)
+                  && GLOBAL_STATE->ASIC_initalized
+                  && (measured_vout < 0.2f);
+    has_critical_fault = off_unexpected
+                      || (status & (TPS546_STATUS_VOUT_OV | TPS546_STATUS_IOUT_OC | TPS546_STATUS_VIN_UV | TPS546_STATUS_TEMP));
+
+    if (status & TPS546_STATUS_OFF) {
+        if (!tps_off_seen) {
+            tps_off_seen = true;
+            ESP_LOGW(TAG,
+                     "STATUS_OFF observed: asic_initialized=%d measured_vout=%.3fV off_unexpected=%d",
+                     GLOBAL_STATE->ASIC_initalized,
+                     measured_vout,
+                     off_unexpected);
+
+            TPS546_StatusSnapshot snapshot = {0};
+            if (TPS546_snapshot_status(&snapshot) == ESP_OK) {
+                TPS546_log_snapshot(&snapshot);
+            } else {
+                ESP_LOGE(TAG, "Failed to capture TPS546 snapshot on STATUS_OFF");
+            }
+        }
+    } else {
+        tps_off_seen = false;
+    }
+
+    if (has_critical_fault) {
+        tps_clear_streak = 0;
+        if (tps_fault_streak < UINT8_MAX) {
+            tps_fault_streak++;
+        }
+
+        ESP_LOGW(TAG,
+                 "Critical TPS status streak %u/3 (status=0x%04X, vout=%.3fV, off_unexpected=%d)",
+                 tps_fault_streak,
+                 status,
+                 measured_vout,
+                 off_unexpected);
+
+        // Require multiple consecutive critical reads before raising a fault.
+        if (tps_fault_streak >= 3) {
         if (SYSTEM_MODULE->power_fault == 0) {
             ESP_RETURN_ON_ERROR(TPS546_parse_status(status), TAG, "Failed to parse STATUS_WORD");
             SYSTEM_MODULE->power_fault = 1;
         }
+        }
     } else {
+        tps_fault_streak = 0;
+        if (tps_clear_streak < UINT8_MAX) {
+            tps_clear_streak++;
+        }
+
+        // Keep a short hysteresis before clearing power_fault.
+        if (tps_clear_streak >= 2) {
         SYSTEM_MODULE->power_fault = 0;
+        }
     }
     return ESP_OK;
 }
@@ -1015,12 +1121,17 @@ esp_err_t TPS546_set_vout(float volts) {
     uint16_t value;
     uint8_t value8;
 
+    TPS546_log_power_state("set_vout:entry", volts);
+
     if (volts == 0) {
+        ESP_LOGW(TAG, "Host command: OPERATION_OFF (requested VOUT=0)");
         /* turn off output */
         if (smb_write_byte(PMBUS_OPERATION, OPERATION_OFF) != ESP_OK) {
             ESP_LOGE(TAG, "Could not turn off Vout");
             return ESP_FAIL;
         }
+
+        TPS546_log_power_state("set_vout:after_off", volts);
     } else {
         /* make sure we're in range */
         if ((volts < tps546_config.TPS546_INIT_VOUT_MIN) || (volts > tps546_config.TPS546_INIT_VOUT_MAX)) {
@@ -1037,6 +1148,7 @@ esp_err_t TPS546_set_vout(float volts) {
             ESP_LOGI(TAG, "Vout changed to %1.2f V", volts);
 
             /* turn on output */
+            ESP_LOGW(TAG, "Host command: OPERATION_ON (requested VOUT=%.3f)", volts);
            if (smb_write_byte(PMBUS_OPERATION, OPERATION_ON) != ESP_OK) {
                 ESP_LOGE(TAG, "Could not turn on Vout");
                 return ESP_FAIL;
@@ -1051,6 +1163,8 @@ esp_err_t TPS546_set_vout(float volts) {
             if (value8 != OPERATION_ON) {
                 ESP_LOGE(TAG, "Operation not set to ON: %02X", value8);
             }
+
+            TPS546_log_power_state("set_vout:after_on", volts);
 
         }
     }
@@ -1231,6 +1345,28 @@ esp_err_t TPS546_snapshot_status(TPS546_StatusSnapshot *s) {
     ESP_LOGE(TAG, "READ_VIN:     %.3f V", s->read_vin);
     ESP_LOGE(TAG, "READ_IOUT:    %.3f A", s->read_iout);
     ESP_LOGE(TAG, "TEMP1:        %d C",   s->read_temp1);
+
+    // Always print raw detail registers to catch clues that may not be reflected
+    // in top-level STATUS_WORD bits at sampling time.
+    ESP_LOGE(TAG,
+             "RAW DETAIL: VOUT=0x%02X INPUT=0x%02X IOUT=0x%02X TEMP=0x%02X CML=0x%02X MFR=0x%02X OTHER=0x%02X",
+             s->st_vout,
+             s->st_input,
+             s->st_iout,
+             s->st_temp,
+             s->st_cml,
+             s->st_mfr,
+             s->st_other);
+
+    if (s->st_input & TPS546_STATUS_VIN_LOW_VIN) {
+        ESP_LOGE(TAG, "RAW STATUS_INPUT indicates LOW_VIN (live bit set)");
+    }
+    if (s->st_mfr & TPS546_STATUS_MFR_POR) {
+        ESP_LOGE(TAG, "RAW STATUS_MFR indicates POR event");
+    }
+    if (s->st_mfr & TPS546_STATUS_MFR_RESET) {
+        ESP_LOGE(TAG, "RAW STATUS_MFR indicates RESET_VOUT event");
+    }
 
     // Detail bytes — print only set bits
     if (s->status_word & TPS546_STATUS_VOUT) {

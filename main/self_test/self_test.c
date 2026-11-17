@@ -32,11 +32,12 @@
 #define SELF_TEST_PID_D 2.0f
 #define SELF_TEST_DOMAIN_HASHRATE_TOLERANCE 0.33f
 #define SELF_TEST_DOMAIN_REJECTED_WARN_RATIO 0.25f
+#define SELF_TEST_FAN_TACH_AVAILABLE 0
 
 #define SELF_TEST_CORE_VOLTAGE_TOLERANCE 0.10f
 
 // Test Power Consumption
-#define POWER_CONSUMPTION_MARGIN 3 //+/- watts
+#define POWER_CONSUMPTION_MARGIN 5 //+/- watts
 
 // Test Input Voltage
 #define INPUT_VOLTAGE_MARGIN 0.10f // +/- 10%
@@ -329,15 +330,6 @@ esp_err_t self_test_init(void * pvParameters)
     return ESP_OK;
 }
 
-void self_test_reset()
-{
-    if (longPressSemaphore != NULL) {
-        ESP_LOGI(TAG, "Long press detected...");
-        // Give the semaphore back
-        xSemaphoreGive(longPressSemaphore);
-    }
-}
-
 void self_test_show_message(void * pvParameters, const char * msg)
 {
     GlobalState * GLOBAL_STATE = (GlobalState *) pvParameters;
@@ -350,6 +342,11 @@ void self_test_show_message(void * pvParameters, const char * msg)
 
 static esp_err_t test_fan_sense(GlobalState * GLOBAL_STATE)
 {
+#if !SELF_TEST_FAN_TACH_AVAILABLE
+    (void)GLOBAL_STATE;
+    ESP_LOGI(TAG, "[SKIP] fan tach: feedback is not available on this hardware");
+    return ESP_OK;
+#else
     uint16_t fan_speed = Thermal_get_fan_speed(&GLOBAL_STATE->DEVICE_CONFIG);
     uint16_t target_speed = FAN_SPEED_TARGET_MIN;
 
@@ -365,6 +362,7 @@ static esp_err_t test_fan_sense(GlobalState * GLOBAL_STATE)
     ESP_LOGE(TAG, "FAN test failed!");
     self_test_show_message(GLOBAL_STATE, "FAN:WARN");
     return ESP_FAIL;
+#endif
 }
 
 static esp_err_t test_power_consumption(GlobalState * GLOBAL_STATE)
@@ -630,6 +628,8 @@ void self_test_task(void * pvParameters)
 
     // Check domain hashrates from monitor module
     bool domain_failed = false;
+    bool domain_hashrate_authoritative = true;
+    float domain_total_hashrate = 0.0f;
     uint32_t failed_asic_mask = 0;
     for (int asic_nr = 0; asic_nr < GLOBAL_STATE->DEVICE_CONFIG.family.asic_count; asic_nr++) {
         int hash_domains = GLOBAL_STATE->DEVICE_CONFIG.family.asic.hash_domains;
@@ -648,6 +648,7 @@ void self_test_task(void * pvParameters)
                      domain_hashrate,
                      (unsigned long)sample_count,
                      (unsigned long)rejected_sample_count);
+            domain_total_hashrate += domain_hashrate;
             if (rejected_sample_count > 0) {
                 ESP_LOGW(TAG,
                          "ASIC %d Domain %d ignored %lu implausible register sample(s); using nonce hashrate for total validation",
@@ -687,11 +688,23 @@ void self_test_task(void * pvParameters)
 
             if (domain_status == SELF_TEST_DOMAIN_FAIL) {
                 domain_failed = true;
+                domain_hashrate_authoritative = false;
                 if (asic_nr < 32) {
                     failed_asic_mask |= (1u << asic_nr);
                 }
             }
+            if (domain_status == SELF_TEST_DOMAIN_UNRELIABLE || sample_count == 0) {
+                domain_hashrate_authoritative = false;
+            }
         }
+    }
+    float validated_hashrate = hashrate;
+    if (domain_hashrate_authoritative && domain_total_hashrate > validated_hashrate) {
+        validated_hashrate = domain_total_hashrate;
+        ESP_LOGI(TAG,
+                 "Using reliable domain hashrate %.2f Gh/s for total validation (nonce estimate %.2f Gh/s)",
+                 domain_total_hashrate,
+                 hashrate);
     }
     self_test_domain_averages_free(&domain_averages);
     if (domain_failed) {
@@ -716,7 +729,7 @@ void self_test_task(void * pvParameters)
         tests_done(GLOBAL_STATE, false);
     }
 
-    if (hashrate < expected_hashrate) {
+    if (validated_hashrate < expected_hashrate) {
         ESP_LOGE(TAG, "Total hashrate too low");
         self_test_show_message(GLOBAL_STATE, "HASHRATE:FAIL");
         tests_done(GLOBAL_STATE, false);

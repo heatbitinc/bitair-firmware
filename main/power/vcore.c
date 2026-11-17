@@ -60,7 +60,24 @@ static TPS546_CONFIG get_tps546_config(const FamilyConfig * family)
         config.TPS546_INIT_SYNC_CONFIG = 0x10;    // Disable SYNC
         break;
 
-    default: // MAX, ULTRA, SUPRA, GAMMA
+    case GAMMA: // Bitair
+        config.TPS546_INIT_PHASE = TPS546_INIT_PHASE_SINGLE;
+        config.TPS546_INIT_VIN_ON = 4.8;
+        config.TPS546_INIT_VIN_OFF = 4.5;
+        config.TPS546_INIT_VIN_UV_WARN_LIMIT = 0;
+        config.TPS546_INIT_VIN_OV_FAULT_LIMIT = 6.5;
+        config.TPS546_INIT_SCALE_LOOP = 0.25;
+        config.TPS546_INIT_VOUT_MIN = 1;
+        config.TPS546_INIT_VOUT_MAX = 2;
+        config.TPS546_INIT_VOUT_COMMAND = 1.2;
+        // Gamma boards (600-series) need higher current headroom at 600MHz profiles.
+        config.TPS546_INIT_IOUT_OC_WARN_LIMIT = 35.00;
+        config.TPS546_INIT_IOUT_OC_FAULT_LIMIT = 40.00;
+        config.TPS546_INIT_STACK_CONFIG = 0x0000; // 1 module
+        config.TPS546_INIT_SYNC_CONFIG = 0x10;    // Disable SYNC
+        break;
+
+    default: // MAX, ULTRA, SUPRA
         config.TPS546_INIT_PHASE = TPS546_INIT_PHASE_SINGLE;
         config.TPS546_INIT_VIN_ON = 4.8;
         config.TPS546_INIT_VIN_OFF = 4.5;
@@ -96,6 +113,8 @@ esp_err_t VCORE_init(GlobalState * GLOBAL_STATE)
         ESP_RETURN_ON_ERROR(TPS546_init(tps_config), TAG, "TPS546 init failed!");
     }
 
+    gpio_set_direction(GPIO_ASIC_ENABLE, GPIO_MODE_OUTPUT);
+
     if (GLOBAL_STATE->DEVICE_CONFIG.plug_sense) {
         gpio_config_t barrel_jack_conf = {
             .pin_bit_mask = (1ULL << GPIO_PLUG_SENSE),
@@ -104,13 +123,14 @@ esp_err_t VCORE_init(GlobalState * GLOBAL_STATE)
         gpio_config(&barrel_jack_conf);
         int barrel_jack_plugged_in = gpio_get_level(GPIO_PLUG_SENSE);
 
-        gpio_set_direction(GPIO_ASIC_ENABLE, GPIO_MODE_OUTPUT);
         if (barrel_jack_plugged_in == 1 || GLOBAL_STATE->DEVICE_CONFIG.asic_enable) {
             gpio_set_level(GPIO_ASIC_ENABLE, 0);
         } else {
             // turn ASIC off
             gpio_set_level(GPIO_ASIC_ENABLE, 1);
         }
+    } else {
+        gpio_set_level(GPIO_ASIC_ENABLE, GLOBAL_STATE->DEVICE_CONFIG.asic_enable ? 0 : 1);
     }
 
     return ESP_OK;
@@ -126,7 +146,9 @@ esp_err_t VCORE_set_voltage(GlobalState * GLOBAL_STATE, float core_voltage)
     }
 
     if (GLOBAL_STATE->DEVICE_CONFIG.DS4432U) {
-        if (core_voltage != 0.0f) {
+        if (core_voltage == 0.0f) {
+            ESP_RETURN_ON_ERROR(DS4432U_set_voltage(0.046f), TAG, "DS4432U set off voltage failed!");
+        } else {
             ESP_RETURN_ON_ERROR(DS4432U_set_voltage(core_voltage), TAG, "DS4432U set voltage failed!");
         }
     }

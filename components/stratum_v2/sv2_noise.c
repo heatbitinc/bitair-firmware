@@ -19,7 +19,7 @@
 
 static const char *TAG = "sv2_noise";
 
-#define TRANSPORT_TIMEOUT_MS    5000
+#define TRANSPORT_TIMEOUT_MS    15000
 #define RECV_TIMEOUT_MS         (60 * 3 * 1000)
 // Handshake should complete within seconds; if the server doesn't respond fast we
 // want to fail and reconnect rather than block here for 3 minutes.

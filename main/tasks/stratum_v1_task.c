@@ -6,12 +6,11 @@
 #include "stratum_v1_task.h"
 #include "stratum_socket.h"
 #include "protocol_coordinator.h"
-#include "connect.h"
+#include "wifi_connect.h"
 #include "work_queue.h"
 #include <esp_sntp.h>
 #include "esp_timer.h"
 #include "esp_transport.h"
-#include "esp_transport_tcp.h"
 #include <stdbool.h>
 #include <string.h>
 #include "utils.h"
@@ -38,7 +37,7 @@
 #define FALLBACK_STRATUM_PW CONFIG_FALLBACK_STRATUM_PW
 #define STRATUM_DIFFICULTY CONFIG_STRATUM_DIFFICULTY
 
-#define TRANSPORT_TIMEOUT_MS 5000
+#define TRANSPORT_TIMEOUT_MS 15000
 
 #define BUFFER_SIZE 1024
 

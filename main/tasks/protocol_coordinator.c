@@ -2,16 +2,14 @@
 #include "esp_timer.h"
 #include "esp_transport.h"
 #include "esp_transport_tcp.h"
-#include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "esp_heap_caps.h"
 
 #include "protocol_coordinator.h"
 #include "stratum_v1_task.h"
 #include "stratum_v2_task.h"
-#include "connect.h"
+#include "wifi_connect.h"
 #include "system.h"
-#include "nvs_config.h"
 
 #include <string.h>
 
@@ -33,9 +31,10 @@ typedef enum {
     COORD_EVENT_PROTOCOL_SUCCESS,
     COORD_EVENT_V1_TASK_EXITED,
     COORD_EVENT_V2_TASK_EXITED,
+    COORD_EVENT_RECONNECT_REQUEST,
 } coordinator_event_t;
 
-#define TRANSPORT_TIMEOUT_MS 5000
+#define TRANSPORT_TIMEOUT_MS 15000
 #define HEARTBEAT_INTERVAL_MS 60000
 #define INITIAL_HEARTBEAT_DELAY_MS 10000
 // While paused (all pools unreachable), probe again on this cadence.
@@ -55,10 +54,6 @@ static stratum_protocol_t s_primary_protocol;
 static stratum_protocol_t s_fallback_protocol;
 static stratum_protocol_t s_running_protocol;
 static bool s_heartbeat_enabled = false;
-
-// Primary pool info (saved at startup for heartbeat probing)
-static const char *s_primary_url = NULL;
-static uint16_t s_primary_port = 0;
 
 // Number of consecutive pools (primary and/or fallback) that have exhausted
 // their retry budget without a successful setup. When this reaches
@@ -88,6 +83,14 @@ void protocol_coordinator_notify_failure(void)
 void protocol_coordinator_notify_success(void)
 {
     coordinator_event_t evt = COORD_EVENT_PROTOCOL_SUCCESS;
+    if (s_event_queue) {
+        xQueueSend(s_event_queue, &evt, 0);
+    }
+}
+
+void protocol_coordinator_request_reconnect(void)
+{
+    coordinator_event_t evt = COORD_EVENT_RECONNECT_REQUEST;
     if (s_event_queue) {
         xQueueSend(s_event_queue, &evt, 0);
     }
@@ -126,6 +129,7 @@ static void reset_share_stats(GlobalState *gs)
         gs->SYSTEM_MODULE.rejected_reason_stats[i].message[0] = '\0';
     }
     gs->SYSTEM_MODULE.rejected_reason_stats_count = 0;
+    gs->SYSTEM_MODULE.shares_submitted = 0;
     gs->SYSTEM_MODULE.shares_accepted = 0;
     gs->SYSTEM_MODULE.shares_rejected = 0;
     gs->SYSTEM_MODULE.work_received = 0;
@@ -259,7 +263,8 @@ static bool probe_pool_v1(GlobalState *gs, const char *url, uint16_t port,
     STRATUM_V1_subscribe(transport, send_uid++, gs->DEVICE_CONFIG.family.asic.name);
     STRATUM_V1_authorize(transport, send_uid++, user, pass);
 
-    char recv_buffer[BUFFER_SIZE];
+    // Keep probe buffer off task stack to avoid deep-call stack spikes.
+    static char recv_buffer[BUFFER_SIZE];
     memset(recv_buffer, 0, BUFFER_SIZE);
     int bytes_received = esp_transport_read(transport, recv_buffer, BUFFER_SIZE - 1, TRANSPORT_TIMEOUT_MS);
 
@@ -342,7 +347,10 @@ static void do_heartbeat_probe(GlobalState *gs)
         return;
     }
 
-    ESP_LOGD(TAG, "Heartbeat: probing primary pool %s:%d", s_primary_url, s_primary_port);
+    ESP_LOGD(TAG,
+             "Heartbeat: probing primary pool %s:%d",
+             gs->SYSTEM_MODULE.pool_url != NULL ? gs->SYSTEM_MODULE.pool_url : "<null>",
+             gs->SYSTEM_MODULE.pool_port);
 
     if (probe_pool(gs, /*use_fallback=*/false)) {
         switch_to_primary(gs);
@@ -365,6 +373,7 @@ static void enter_paused_state(GlobalState *gs)
 {
     s_state = COORD_STATE_PAUSED;
     gs->SYSTEM_MODULE.pools_unavailable = true;
+    gs->SYSTEM_MODULE.stratum_connected = false;
     s_heartbeat_enabled = false;
     ESP_LOGW(TAG, "All configured pools unreachable, pausing mining to conserve power.");
 }
@@ -439,6 +448,7 @@ static void handle_event(GlobalState *gs, coordinator_event_t evt)
                 // Stray failure from a task that exited after we already paused — ignore.
                 break;
             }
+            gs->SYSTEM_MODULE.stratum_connected = false;
             s_consecutive_pool_failures++;
             int threshold = pool_failure_threshold(gs);
             ESP_LOGW(TAG, "Protocol failure reported (state=%d, failures=%d/%d)",
@@ -473,6 +483,7 @@ static void handle_event(GlobalState *gs, coordinator_event_t evt)
             }
             s_consecutive_pool_failures = 0;
             gs->SYSTEM_MODULE.pools_unavailable = false;
+            gs->SYSTEM_MODULE.stratum_connected = true;
             break;
 
         case COORD_EVENT_V1_TASK_EXITED:
@@ -482,6 +493,42 @@ static void handle_event(GlobalState *gs, coordinator_event_t evt)
             // If we receive one here unexpectedly, just log it.
             ESP_LOGI(TAG, "Task exited event received (evt=%d, state=%d)", evt, s_state);
             break;
+
+        case COORD_EVENT_RECONNECT_REQUEST: {
+            ESP_LOGW(TAG, "Reconnect requested due to runtime stratum config change");
+
+            if (s_state != COORD_STATE_PAUSED) {
+                stop_running_task(gs);
+            }
+
+            // Apply fresh stratum settings only after mining is fully stopped,
+            // then start mining again with the updated runtime config.
+            SYSTEM_reload_stratum_settings_from_nvs(gs);
+
+            s_primary_protocol = gs->stratum_protocol;
+            s_fallback_protocol = gs->SYSTEM_MODULE.fallback_pool_protocol;
+
+            if (s_state == COORD_STATE_PAUSED) {
+                s_consecutive_pool_failures = 0;
+                try_resume_from_paused(gs);
+                break;
+            }
+
+            queue_clear(&gs->stratum_queue);
+            reset_share_stats(gs);
+
+            bool use_fallback = gs->SYSTEM_MODULE.is_using_fallback;
+            stratum_protocol_t proto = use_fallback ? s_fallback_protocol : s_primary_protocol;
+            gs->stratum_protocol = proto;
+            s_running_protocol = proto;
+            s_state = use_fallback ? COORD_STATE_RUNNING_FALLBACK : COORD_STATE_RUNNING_PRIMARY;
+            gs->SYSTEM_MODULE.stratum_connected = false;
+
+            start_protocol_task(gs, proto);
+
+            s_heartbeat_enabled = use_fallback && !gs->SYSTEM_MODULE.use_fallback_stratum;
+            break;
+        }
     }
 }
 
@@ -489,8 +536,6 @@ void protocol_coordinator_task(void *pvParameters)
 {
     GlobalState *gs = (GlobalState *)pvParameters;
 
-    s_primary_url = gs->SYSTEM_MODULE.pool_url;
-    s_primary_port = gs->SYSTEM_MODULE.pool_port;
     s_primary_protocol = gs->stratum_protocol;
     s_fallback_protocol = gs->SYSTEM_MODULE.fallback_pool_protocol;
 

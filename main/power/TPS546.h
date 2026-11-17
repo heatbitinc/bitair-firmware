@@ -195,6 +195,8 @@ void TPS546_write_entire_config(void);
 int TPS546_get_frequency(void);
 void TPS546_set_frequency(int);
 int TPS546_get_temperature(void);
+/* Whether the last TPS546_get_temperature() call read the sensor (otherwise it returned the previous value). */
+bool TPS546_temperature_read_ok(void);
 float TPS546_get_vin(void);
 float TPS546_get_iout(void);
 float TPS546_get_vout(void);

@@ -1,4 +1,3 @@
-#include <stdio.h>
 #include "esp_log.h"
 #include "esp_check.h"
 
@@ -7,9 +6,55 @@
 
 static const char * TAG = "EMC2101";
 
+#ifndef CONFIG_FAN_PWM_FREQUENCY_HZ_EFFECTIVE
+#define CONFIG_FAN_PWM_FREQUENCY_HZ_EFFECTIVE 1400
+#endif
+
 static i2c_master_dev_handle_t emc2101_dev_handle;
 
 static int temp_offset;
+static const uint8_t EMC2101_SPINUP_DISABLED = 0x00;
+
+// Requested fan percentages are scaled to 75% of the EMC2101 setting range.
+// This matches the fan drive circuit on Bitair; keep it as is.
+static const float FAN_DUTY_SCALE = 0.75f;
+
+static uint8_t emc2101_pwm_range_from_hz(uint32_t pwm_hz)
+{
+    switch (pwm_hz) {
+        case 22500:
+            return 0;
+        case 11250:
+            return 1;
+        case 5600:
+            return 2;
+        case 1400:
+            return 3;
+        default:
+            ESP_LOGW(TAG, "Unsupported PWM frequency %lu Hz, fallback to 1400 Hz", (unsigned long)pwm_hz);
+            return 3;
+    }
+}
+
+esp_err_t EMC2101_set_pwm_frequency_hz(uint32_t pwm_hz)
+{
+    uint8_t range_bits = emc2101_pwm_range_from_hz(pwm_hz);
+
+    // Base fan configuration keeps existing behavior and updates only RANGE bits.
+    uint8_t fan_cfg = 0b00100011;
+    fan_cfg = (fan_cfg & (uint8_t)~0x03U) | (range_bits & 0x03U);
+
+    ESP_RETURN_ON_ERROR(i2c_bitaxe_register_write_byte(emc2101_dev_handle, EMC2101_FAN_CONFIG, fan_cfg), TAG, "Failed to set EMC2101 PWM frequency");
+
+    const uint32_t applied_hz[] = {22500, 11250, 5600, 1400};
+    ESP_LOGI(TAG,
+             "EMC2101 PWM frequency request=%lu Hz, applied=%lu Hz (range=%u)",
+             (unsigned long)pwm_hz,
+             (unsigned long)applied_hz[range_bits],
+             (unsigned)range_bits);
+
+    return ESP_OK;
+}
 
 /**
  * @brief Initialize the EMC2101 sensor.
@@ -39,10 +84,14 @@ esp_err_t EMC2101_init(int temp_offset_param)
     // Bit 5 (LEVEL)= 1: Direct Setting Mode (use PWM Duty Cycle Reg 0x4C)
     // Bit 4 (POL)  = 0: Normal Polarity (placeholder, set below)
     // Bit 3:2(EDGES)=00: 2 Tach pulses per revolution (standard)
-    // Bit 1:0(RANGE)=00: PWM Frequency ~22.5 kHz (common setting)
-    // //if (invertPolarity) {
-        ESP_RETURN_ON_ERROR(i2c_bitaxe_register_write_byte(emc2101_dev_handle, EMC2101_FAN_CONFIG, 0b00100011), TAG, "Failed to configure fan settings");
-    // //}
+    // Bit 1:0(RANGE)=PWM base frequency (set below from sdkconfig)
+    ESP_RETURN_ON_ERROR(EMC2101_set_pwm_frequency_hz((uint32_t)CONFIG_FAN_PWM_FREQUENCY_HZ_EFFECTIVE), TAG, "Failed to apply PWM frequency setting");
+
+    // Disable hardware spin-up assist to avoid audible 100% boost when duty goes 0% -> target.
+    // Fan speed transitions are controlled by firmware policy in fan_controller_task.
+    ESP_RETURN_ON_ERROR(i2c_bitaxe_register_write_byte(emc2101_dev_handle, EMC2101_FAN_SPINUP, EMC2101_SPINUP_DISABLED),
+                        TAG,
+                        "Failed to disable EMC2101 fan spin-up profile");
     
 
 
@@ -74,7 +123,7 @@ esp_err_t EMC2101_set_fan_speed(float percent)
 {
     uint8_t speed;
 
-    speed = (uint8_t) (63.0 * percent);
+    speed = (uint8_t) (63.0 * percent * FAN_DUTY_SCALE);
     ESP_RETURN_ON_ERROR(i2c_bitaxe_register_write_byte(emc2101_dev_handle, EMC2101_REG_FAN_SETTING, speed), TAG, "Failed to set fan speed");
     return ESP_OK;
 }

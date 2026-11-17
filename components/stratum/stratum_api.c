@@ -20,7 +20,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
-#define TRANSPORT_TIMEOUT_MS 5000
+#define TRANSPORT_TIMEOUT_MS 15000
 #define BUFFER_SIZE 1024
 #define MAX_EXTRANONCE_2_LEN 32
 static const char * TAG = "stratum_api";
@@ -530,7 +530,7 @@ int STRATUM_V1_suggest_difficulty(esp_transport_handle_t transport, int send_uid
     char difficulty_msg[BUFFER_SIZE];
     snprintf(difficulty_msg, sizeof(difficulty_msg),
         "{\"id\":%d,\"method\":\"mining.suggest_difficulty\",\"params\":[%ld]}\n",
-        send_uid, difficulty);
+        send_uid, (unsigned long)difficulty);
     debug_stratum_tx(difficulty_msg);
 
     return esp_transport_write(transport, difficulty_msg, strlen(difficulty_msg), TRANSPORT_TIMEOUT_MS);
@@ -585,7 +585,8 @@ int STRATUM_V1_submit_share(esp_transport_handle_t transport, int send_uid, cons
     char submit_msg[BUFFER_SIZE];
     snprintf(submit_msg, sizeof(submit_msg),
         "{\"id\":%d,\"method\":\"mining.submit\",\"params\":[\"%s\",\"%s\",\"%s\",\"%08lx\",\"%08lx\",\"%08lx\"]}\n",
-        send_uid, username, job_id, extranonce_2, ntime, nonce, version_bits);
+        send_uid, username, job_id, extranonce_2,
+        (unsigned long)ntime, (unsigned long)nonce, (unsigned long)version_bits);
 
     int ret = esp_transport_write(transport, submit_msg, strlen(submit_msg), TRANSPORT_TIMEOUT_MS);
 

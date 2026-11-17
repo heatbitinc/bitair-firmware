@@ -87,7 +87,10 @@ int count_asic_chips(uint16_t asic_count, uint16_t chip_id, int chip_id_response
 
     int chip_counter = 0;
     while (true) {
-        int received = SERIAL_rx(buffer, chip_id_response_length, 1000);
+        // Wait up to 1 s for the expected chips; once they have all answered,
+        // only listen briefly for unexpected extra ones (responses arrive back to back).
+        int timeout_ms = chip_counter < asic_count ? 1000 : 50;
+        int received = SERIAL_rx(buffer, chip_id_response_length, timeout_ms);
         if (received == 0) break;
 
         if (received == -1) {
@@ -147,7 +150,9 @@ int count_asic_chips(uint16_t asic_count, uint16_t chip_id, int chip_id_response
 
 esp_err_t receive_work(uint8_t * buffer, int buffer_size, uint64_t *out_timestamp_us)
 {
-    int received = SERIAL_rx(buffer, buffer_size, 10000);
+    // Short timeout: the caller just retries, and a long blocking read holds the
+    // UART lock that uart_flush() in mining start needs.
+    int received = SERIAL_rx(buffer, buffer_size, 1000);
     if (out_timestamp_us) {
         *out_timestamp_us = esp_timer_get_time();
     }

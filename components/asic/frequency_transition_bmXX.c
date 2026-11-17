@@ -6,7 +6,9 @@
 #include "global_state.h"
 
 #define EPSILON 0.0001f
-#define STEP_SIZE 6.25 // MHz step size
+#include "sdkconfig.h"
+
+#define STEP_SIZE (6.25 * CONFIG_ASIC_FREQ_RAMP_STEP_MULT) // MHz step size
 
 static const char * TAG = "frequency_transition";
 
@@ -26,7 +28,7 @@ void do_frequency_transition(void * pvParameters, set_hash_frequency_fn set_freq
         return;
     }
 
-    ESP_LOGI(TAG, "Ramping up frequency from %g MHz to %g MHz", current_frequency, target_frequency);
+    ESP_LOGI(TAG, "Ramping frequency from %g MHz to %g MHz", current_frequency, target_frequency);
 
     int current_step = (target_frequency > current_frequency) ? (int)floor(current_frequency / STEP_SIZE) : (int)ceil(current_frequency / STEP_SIZE);
     int target_step = (target_frequency > current_frequency) ? (int)floor(target_frequency / STEP_SIZE) : (int)ceil(target_frequency / STEP_SIZE);
@@ -41,7 +43,7 @@ void do_frequency_transition(void * pvParameters, set_hash_frequency_fn set_freq
             current_frequency = current_step * STEP_SIZE;
             GLOBAL_STATE->POWER_MANAGEMENT_MODULE.actual_frequency = set_frequency_fn(current_frequency);
             
-            vTaskDelay(100 / portTICK_PERIOD_MS);
+            vTaskDelay(pdMS_TO_TICKS(CONFIG_ASIC_FREQ_RAMP_STEP_DELAY_MS));
         }
     }
     
