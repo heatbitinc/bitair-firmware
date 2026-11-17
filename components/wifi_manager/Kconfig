@@ -1,0 +1,15 @@
+menu "Wi-Fi"
+
+    config ESP_WIFI_SSID
+        string "WiFi SSID"
+        default ""
+        help
+            SSID of the default network used when no credentials are stored.
+
+    config ESP_WIFI_PASSWORD
+        string "WiFi Password"
+        default ""
+        help
+            Password of the default network.
+
+endmenu
