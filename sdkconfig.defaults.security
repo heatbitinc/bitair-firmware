@@ -1,0 +1,37 @@
+# Production security settings, applied at manufacturing. Add this file to
+# SDKCONFIG_DEFAULTS for release builds:
+#   idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.security" build
+#
+# WARNING: a bootloader built with these settings checks app signatures, and the
+# application encrypts NVS with a key derived from an eFuse HMAC key (generated
+# and burned on first boot if the block is empty). eFuses cannot be reset. Do not
+# flash such a build onto a development board unless you mean to. Secure Boot and
+# Flash Encryption are enabled from the host at manufacturing (espefuse), not by
+# the bootloader.
+#
+# Owners can still install their own firmware: see doc/installing-your-own-firmware.md.
+
+# Secure Boot v2 (RSA-3072). Binaries are built unsigned and signed outside the
+# build; the signing keys are not part of this repository.
+CONFIG_SECURE_BOOT=y
+CONFIG_SECURE_BOOT_V2_ENABLED=y
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=n
+# Keep unused key digest slots: one is reserved for the owner's key.
+CONFIG_SECURE_BOOT_INSECURE=y
+CONFIG_SECURE_BOOT_ALLOW_UNUSED_DIGEST_SLOTS=y
+# Keep the full UART download mode, so the owner can add a key and flash.
+CONFIG_SECURE_INSECURE_ALLOW_DL_MODE=y
+
+# Flash Encryption in development mode: esptool can still write encrypted
+# images (write_flash --encrypt). Must already be enabled in eFuses.
+CONFIG_SECURE_FLASH_ENC_ENABLED=y
+CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y
+CONFIG_SECURE_FLASH_REQUIRE_ALREADY_ENABLED=y
+CONFIG_SECURE_FLASH_UART_BOOTLOADER_ALLOW_ENC=y
+
+# NVS encryption with the key derived by the HMAC peripheral.
+# eFuse layout: KEY0/KEY1 Heatbit secure boot digests, KEY2 owner digest,
+# KEY3 NVS HMAC, KEY4 flash encryption, KEY5 spare.
+CONFIG_NVS_ENCRYPTION=y
+CONFIG_NVS_SEC_KEY_PROTECT_USING_HMAC=y
+CONFIG_NVS_SEC_HMAC_EFUSE_KEY_ID=3
