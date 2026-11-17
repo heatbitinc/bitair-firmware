@@ -737,12 +737,12 @@ void stratum_v2_task(void *pvParameters)
         // 1. Send SetupConnection
         {
             const char *device_model = GLOBAL_STATE->DEVICE_CONFIG.family.asic.name;
-            ESP_LOGI(TAG, "Sending SetupConnection (vendor=bitaxe, hw=%s, channel=%s)",
+            ESP_LOGI(TAG, "Sending SetupConnection (vendor=bitair, hw=%s, channel=%s)",
                      device_model ? device_model : "",
                      channel_type == SV2_CHANNEL_EXTENDED ? SV2_CHANNEL_TYPE_EXTENDED : SV2_CHANNEL_TYPE_STANDARD);
             int frame_len = sv2_build_setup_connection(frame_buf, sizeof(frame_buf),
                                                        stratum_url, port,
-                                                       "bitaxe", device_model ? device_model : "",
+                                                       "bitair", device_model ? device_model : "",
                                                        "", "", setup_flags);
             if (frame_len < 0 || sv2_noise_send(noise_ctx, transport, frame_buf, frame_len) != 0) {
                 ESP_LOGE(TAG, "Failed to send SetupConnection");

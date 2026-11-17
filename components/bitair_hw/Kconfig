@@ -1,0 +1,33 @@
+menu "Bitair peripherals"
+
+    config INDICATION_LED_ACTIVE_LEVEL
+        int "Indication LED active level"
+        range 0 1
+        default 1
+        help
+            Logic level that turns the indication LED on.
+            1 = active-high (default), 0 = active-low.
+
+    choice PWM_DUTY_LOG_LEVEL
+        prompt "PWM duty monitor log detail"
+        default PWM_DUTY_LOG_BASIC
+        help
+            Controls verbosity for PWM duty monitor diagnostics.
+
+        config PWM_DUTY_LOG_OFF
+            bool "Off"
+            help
+                Disable PWM duty monitor informational/warning diagnostics.
+
+        config PWM_DUTY_LOG_BASIC
+            bool "Basic"
+            help
+                Log startup configuration and fan mode/power state changes.
+
+        config PWM_DUTY_LOG_VERBOSE
+            bool "Verbose"
+            help
+                Log per-cycle PWM input snapshots and detailed debounce traces.
+    endchoice
+
+endmenu
