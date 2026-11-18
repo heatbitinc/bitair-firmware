@@ -17,11 +17,9 @@ static bool s_started;
 static bool s_sntp_initialized;
 
 static const char *s_ntp_servers[] = {
-    "ntp.aliyun.com",
-    "time1.cloud.tencent.com",
-    "time2.cloud.tencent.com",
-    "cn.pool.ntp.org",
     "pool.ntp.org",
+    "time.google.com",
+    "time.cloudflare.com",
 };
 
 static size_t configure_sntp_servers(void)
