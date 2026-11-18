@@ -27,7 +27,7 @@ jobs:
           target: esp32s3
           command: idf.py -D SDKCONFIG_DEFAULTS="${{ matrix.defaults }}" build merge_bins
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: firmware-${{ matrix.name }}
           path: |
@@ -52,13 +52,13 @@ jobs:
           path: test-ci
 
       - name: Run tests in QEMU
-        uses: bitaxeorg/esp32-qemu-test-action@main
+        uses: bitaxeorg/esp32-qemu-test-action@90c2701ac238738f826e545461aec8532db63a0d # main, 2026-05-06
         with:
           path: test-ci
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results
           path: report.xml
