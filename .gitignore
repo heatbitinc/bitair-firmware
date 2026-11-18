@@ -4,7 +4,6 @@ sdkconfig.old
 # Local configuration overlays (backend endpoints, log level)
 sdkconfig.defaults.heatbit
 sdkconfig.defaults.logs
-dependencies.lock
 
 # Visual Studio Code
 .vscode/*
