@@ -34,7 +34,7 @@ idf.py build merge_bins
 `merge_bins` writes `build/bitair-miner_full.bin` (bootloader, partition table and application).
 
 The Heatbit cloud endpoints are not part of this repository. Without them the firmware builds and mines with the
-pool settings stored on the device, but does not connect to the cloud. To point a build at a backend, copy
+pool settings stored on the device, but does not connect to the cloud or check for updates. To point a build at a backend, copy
 `sdkconfig.defaults.heatbit.example` to `sdkconfig.defaults.heatbit` and fill it in.
 
 Production builds also add `sdkconfig.defaults.security` (Secure Boot, Flash Encryption, NVS encryption). Read
@@ -54,6 +54,20 @@ the application, so NVS and the device identity stay intact.
 
 Programming a blank main board (power, connectors, download mode, merged image) is described in
 [FLASHING_BITAIR_MAINBOARD.md](FLASHING_BITAIR_MAINBOARD.md).
+
+## What the cloud controls
+
+A device built with the Heatbit cloud configuration (the firmware Heatbit ships) follows the cloud:
+
+- **Pool.** The cloud sets the pool URL, port, worker and password, and with the worker the payout address. The
+  device applies new settings without a reboot.
+- **Power and modes.** The cloud can switch the device off and on and change the fan mode and the work mode
+  (`heater` mines, `air_purifier` only purifies), as the Heatbit app does.
+- **Updates.** The device checks for firmware updates every 10 minutes and installs them automatically. On a
+  device with Secure Boot only images signed by Heatbit or by the owner's key (see
+  [Installing your own firmware](#installing-your-own-firmware)) start.
+
+A build without `sdkconfig.defaults.heatbit` does none of this.
 
 ## Privacy
 
@@ -81,4 +95,5 @@ distributed WITHOUT ANY WARRANTY; see the license for details. [NOTICE](NOTICE) 
 what Heatbit changed.
 
 "Heatbit", "Bitair" and the Heatbit logo are trademarks of Heatbit Inc. and are not covered by the license.
-Bitaxe is a trademark of bitaxeorg; this is not an official Bitaxe product and is not endorsed by bitaxeorg.
+Bitaxe is a trademark of its respective owner; this is not an official Bitaxe product and is not endorsed by
+the Bitaxe project. See [TRADEMARKS.md](TRADEMARKS.md) before distributing a modified firmware.

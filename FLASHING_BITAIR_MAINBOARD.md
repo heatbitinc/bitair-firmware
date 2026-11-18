@@ -1,6 +1,6 @@
-# Flashing the HEATBIT Bitair MainBoard V1.22
+# Flashing the Heatbit Bitair MainBoard V1.22
 
-This procedure describes how to program a complete merged firmware image onto the ESP32-S3-WROOM-1-N16R8 module fitted to the HEATBIT Bitair MainBoard V1.22.
+This procedure describes how to program a complete merged firmware image onto the ESP32-S3-WROOM-1-N16R8 module fitted to the Heatbit Bitair MainBoard V1.22.
 
 > **Important:** a Bitair that has been provisioned stores its device identity (UUID, worker ID and client certificate) in the NVS partition at `0x9000`. Erasing the flash destroys it, and it cannot be recreated. Use the full procedure below only on a blank board. On a provisioned device write only the application: see [doc/installing-your-own-firmware.md](doc/installing-your-own-firmware.md).
 
@@ -17,7 +17,7 @@ This procedure describes how to program a complete merged firmware image onto th
 
 ## Requirements
 
-- HEATBIT Bitair MainBoard V1.22
+- Heatbit Bitair MainBoard V1.22
 - The supplied merged Bitair firmware image (`.bin`)
 - USB Type-C data cable
 - Computer with an available USB port
@@ -156,7 +156,7 @@ python -m esptool \
 
 - Ensure that `BOOT0` is no longer pressed, then briefly press `RST`.
 - Program the correct merged Bitair ESP32-S3 image again at `0x00000000`.
-- Confirm that the image is intended for the HEATBIT Bitair MainBoard and a 16 MB ESP32-S3 module.
+- Confirm that the image is intended for the Heatbit Bitair MainBoard and a 16 MB ESP32-S3 module.
 
 ## Power Down
 

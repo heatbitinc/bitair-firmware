@@ -29,7 +29,8 @@ General Public License for more details.
 
 The license does not grant any rights to the Heatbit trademarks: "Heatbit",
 "Bitair" and the Heatbit logo are trademarks of Heatbit Inc. Bitaxe is a
-trademark of bitaxeorg; this is not an official Bitaxe product.
+trademark of its respective owner; this is not an official Bitaxe product.
+See TRADEMARKS.md.
 
 The Bitair main board design is published separately under CERN-OHL-S-2.0:
 https://github.com/heatbitinc/bitair-mainboard
